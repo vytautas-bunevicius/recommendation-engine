@@ -1,3 +1,5 @@
 venv/
 data/title.basics.tsv
 data/title.ratings.tsv
+..bfg-report/
+
