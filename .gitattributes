@@ -1,3 +1,0 @@
-data/title.basics.tsv filter=lfs diff=lfs merge=lfs -text
-data/title.basics.tsv filter=lfs diff=lfs merge=lfs -text
-data/title.basics.tsv
