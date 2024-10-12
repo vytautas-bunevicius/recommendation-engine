@@ -8,3 +8,134 @@ data/name.basics.csv
 
 
 ..bfg-report/
+
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / Packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual Environments
+env/
+venv/
+ENV/
+.venv/
+venv.bak/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Pyenv
+.python-version
+
+# pytest
+.cache/
+
+# Unit test / Coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+*.cover
+*.py,cover
+.hypothesis/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pylint
+pylint.log
+
+# Bandit security scanner
+.bandit
+
+# Pyre type checker
+.pyre/
+
+# Pyright
+.pyright/
+
+# PyCharm
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Eclipse
+.project
+.pydevproject
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# JetBrains IDEs
+*.idea
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Lint / Code Style
+flake8.log
+pylint.log
+
+# Coverage
+coverage.xml
+*.cover
+.pytest_cache/
+nosetests.xml
+coverage/
+.cache/
+.tox/
+nox/
+
+# Temporary files
+*.swp
+*.swo
+*~
+# Editor files
+*.bak
+*.tmp
+
+# Logs
+*.log
+
+# Environment Variables
+.env
+.env.*
+
+
