@@ -1,5 +1,10 @@
 venv/
 data/title.basics.tsv
 data/title.ratings.tsv
-..bfg-report/
+data/title.basics.csv
+data/title.ratings.csv
+data/title.crew.csv
+data/name.basics.csv
 
+
+..bfg-report/
