@@ -5,9 +5,9 @@ Registers blueprints for movies, users, and recommendations.
 
 from flask import Flask
 
-from api.movies import movies_bp
-from api.recommendations import recommendations_bp
-from api.users import users_bp
+from src.api.movies import movies_bp
+from src.api.recommendations import recommendations_bp
+from src.api.users import users_bp
 
 
 def create_app() -> Flask:

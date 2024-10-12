@@ -7,8 +7,8 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from database.connection import get_db_connection
-from recommender.content_based import (
+from src.database.connection import get_db_connection
+from src.recommender.content_based import (
     get_content_based_recommendations,
     get_similar_movies
 )

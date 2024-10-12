@@ -7,7 +7,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from database.connection import get_db_connection
+from src.database.connection import get_db_connection
 
 movies_bp = Blueprint('movies', __name__)
 

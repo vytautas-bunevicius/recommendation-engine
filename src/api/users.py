@@ -7,7 +7,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify
 
-from database.connection import get_db_connection
+from src.database.connection import get_db_connection
 
 users_bp = Blueprint('users', __name__)
 
