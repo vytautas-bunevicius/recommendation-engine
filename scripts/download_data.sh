@@ -1,11 +1,14 @@
 #!/bin/bash
+# This script downloads IMDb datasets, unzips them, and converts TSV files to CSV format.
 
-echo "Downloading IMDb datasets..."
+set -e
+
+echo "Starting IMDb data download and processing..."
 
 # Create the data directory if it doesn't exist
 mkdir -p data
 
-# Download datasets
+# IMDb datasets to download
 datasets=(
   "title.basics.tsv.gz"
   "title.ratings.tsv.gz"
@@ -13,6 +16,7 @@ datasets=(
   "title.crew.tsv.gz"
 )
 
+# Download datasets
 for dataset in "${datasets[@]}"; do
   echo "Downloading $dataset..."
   curl -o "data/$dataset" "https://datasets.imdbws.com/$dataset"
@@ -20,9 +24,8 @@ done
 
 echo "Data download complete."
 
-# Unzipping the files
+# Unzip the files
 echo "Unzipping IMDb datasets..."
-
 for dataset in "${datasets[@]}"; do
   echo "Unzipping $dataset..."
   gunzip -f "data/${dataset}"
@@ -32,11 +35,11 @@ echo "Unzipping complete."
 
 # Convert TSV to CSV
 echo "Converting TSV files to CSV..."
-
 for tsv_file in data/*.tsv; do
   csv_file="${tsv_file%.tsv}.csv"
   echo "Converting $tsv_file to $csv_file..."
-  sed 's/\t/,/g' "$tsv_file" > "$csv_file"
+  # Replace tabs with commas, handle potential special characters properly
+  awk 'BEGIN{FS=OFS="\t"} {for(i=1;i<=NF;i++){gsub("\"", "\"\"", $i); $i="\""$i"\""}; print}' "$tsv_file" | sed 's/\t/,/g' > "$csv_file"
   rm "$tsv_file"  # Remove the original TSV file
 done
 
