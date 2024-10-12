@@ -17,19 +17,43 @@ def get_movies() -> Any:
     """Endpoint to retrieve a list of movies.
 
     Query Parameters:
-        limit: Number of movies to return (default 10).
+        limit: Number of movies to return (default 10, max 100).
         offset: Number of movies to skip (default 0).
+        sort: Sort order ('popularity', 'rating', 'year', default 'popularity').
+        order: Sort direction ('asc' or 'desc', default 'desc').
+        type: Type of content ('movie', 'tvSeries', default 'movie').
+        min_votes: Minimum number of votes (default 1000).
 
     Returns:
         JSON response containing a list of movies.
     """
-    limit = request.args.get('limit', 10, type=int)
-    offset = request.args.get('offset', 0, type=int)
+    limit = min(int(request.args.get('limit', 10)), 100)
+    offset = int(request.args.get('offset', 0))
+    sort = request.args.get('sort', 'popularity')
+    order = request.args.get('order', 'desc').upper()
+    content_type = request.args.get('type', 'movie')
+    min_votes = int(request.args.get('min_votes', 1000))
+
+    sort_options = {
+        'popularity': 'num_votes',
+        'rating': 'avg_rating',
+        'year': 'start_year'
+    }
+    sort_column = sort_options.get(sort, 'num_votes')
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM movies LIMIT %s OFFSET %s", (limit, offset))
+    query = f"""
+        SELECT id, title, original_title, type, start_year,
+               runtime, genres, avg_rating, num_votes
+        FROM movies
+        WHERE type = %s AND num_votes >= %s
+        ORDER BY {sort_column} {order} NULLS LAST
+        LIMIT %s OFFSET %s
+    """
+
+    cursor.execute(query, (content_type, min_votes, limit, offset))
     movies = cursor.fetchall()
 
     cursor.close()
@@ -69,25 +93,31 @@ def search_movies() -> Any:
 
     Query Parameters:
         query: The search query string.
-        limit: Number of movies to return (default 10).
+        limit: Number of movies to return (default 10, max 100).
         offset: Number of movies to skip (default 0).
+        type: Type of content ('movie', 'tvSeries', default 'movie').
+        min_votes: Minimum number of votes (default 100).
 
     Returns:
         JSON response containing a list of movies matching the search query.
     """
     query = request.args.get('query', '', type=str)
-    limit = request.args.get('limit', 10, type=int)
-    offset = request.args.get('offset', 0, type=int)
+    limit = min(int(request.args.get('limit', 10)), 100)
+    offset = int(request.args.get('offset', 0))
+    content_type = request.args.get('type', 'movie')
+    min_votes = int(request.args.get('min_votes', 100))
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT * FROM movies
-        WHERE title ILIKE %s
+        SELECT id, title, original_title, type, start_year,
+               runtime, genres, avg_rating, num_votes
+        FROM movies
+        WHERE title ILIKE %s AND type = %s AND num_votes >= %s
         ORDER BY num_votes DESC NULLS LAST
         LIMIT %s OFFSET %s
-    """, (f'%{query}%', limit, offset))
+    """, (f'%{query}%', content_type, min_votes, limit, offset))
     movies = cursor.fetchall()
 
     cursor.close()
