@@ -1,113 +1,183 @@
-# Netflix-like Recommender System: Setup and Usage Guide
+# Netflix-like Recommender System
+
+## Project Overview
+
+This project implements a Netflix-like recommender system using Python, Flask, and PostgreSQL. It processes IMDb datasets to create a movie recommendation engine with a RESTful API. The PostgreSQL database runs in a Docker container for easy setup and portability.
+
+## Architecture Diagram
+
+![Architecture Diagram](images/architecture.png)
+
+
+## Entity-Relationship Diagram (ERD)
+
+![ERD Diagram](images/erd-diagram.png)
+
+## Table of Contents
+
+1. [Features](#features)
+2. [Prerequisites](#prerequisites)
+3. [Installation](#installation)
+4. [Database Setup](#database-setup)
+5. [Usage](#usage)
+6. [API Endpoints](#api-endpoints)
+7. [Data Processing](#data-processing)
+8. [Database Schema](#database-schema)
+9. [Recommendation Algorithm](#recommendation-algorithm)
+10. [Docker Commands](#docker-commands)
+11. [Testing](#testing)
+12. [Future Improvements](#future-improvements)
+
+## Features
+
+- ETL process for IMDb datasets
+- Movie information storage and retrieval
+- User viewing history tracking
+- Content-based movie recommendations
+- RESTful API for accessing movie data and recommendations
+- Dockerized PostgreSQL database
 
 ## Prerequisites
 
-1. Python 3.7+
-2. PostgreSQL database
-3. pip (Python package manager)
+- Python 3.12+
+- Docker
+- Docker Compose
 
-## Setup
+## Installation
 
-1. Clone the repository to your local machine.
+1. Clone the repository:
+   ```
+   git clone https://github.com/vytautas-bunevicius/recommendation-engine.git
+   cd recommendation-engine
+   ```
 
-2. Create a virtual environment and activate it:
+2. Set up a virtual environment:
    ```
    python -m venv venv
    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
    ```
 
-3. Install the required packages:
+3. Install dependencies:
    ```
    pip install -r requirements.txt
    ```
 
-4. Set up the PostgreSQL database:
-   - Create a new database named `netflix_recommender`
-   - Update the database connection details in `src/database/connection.py` if necessary
+4. Start the PostgreSQL database using Docker Compose:
+   ```
+   docker-compose up -d
+   ```
+   This will start a PostgreSQL container with the necessary configurations.
 
-5. Create the database schema:
-   - Run the SQL commands in `src/database/schema.sql` in your PostgreSQL database
+5. Wait for a few seconds to ensure the database is fully up and running.
 
-## Running the Project
+## Database Setup
 
-### Step 1: Download and Process IMDb Data
+After starting the Docker container, create the database schema:
 
-1. Run the download script:
+1. Ensure you're in the project root directory.
+
+2. Run the following command to execute the schema.sql file in the PostgreSQL container:
+   ```
+   docker-compose exec -T db psql -U postgres -d recommendation_engine < src/database/schema.sql
+   ```
+
+3. You should see output indicating that the tables and indexes have been created successfully.
+
+## Usage
+
+1. Download and process IMDb data:
    ```
    bash scripts/download_data.sh
-   ```
-   This will download the IMDb datasets and convert them from TSV to CSV format.
-
-2. Process the IMDb data:
-   ```
    python scripts/process_imdb_data.py
    ```
-   This script will read the CSV files and populate the database tables.
 
-### Step 2: Generate Synthetic User Data
+2. Generate synthetic user data (optional):
+   ```
+   python scripts/generate_user_data.py
+   ```
 
-Run the user data generation script:
+3. Start the Flask API server:
+   ```
+   python src/api/main.py
+   ```
+
+The API will be available at `http://localhost:5000`.
+
+## API Endpoints
+
+- `GET /movies`: Retrieve a list of movies
+- `GET /movies/<movie_id>`: Get details of a specific movie
+- `GET /movies/search`: Search for movies by title
+- `GET /users/<user_id>`: Get user information
+- `GET /users/<user_id>/viewing_history`: Get a user's viewing history
+- `GET /users/<user_id>/recommendations`: Get personalized movie recommendations
+- `GET /movies/<movie_id>/similar`: Get similar movies
+
+For detailed API documentation, refer to the `src/api` directory.
+
+## Data Processing
+
+The project uses IMDb datasets, which are processed using the following steps:
+
+1. Download TSV files from IMDb
+2. Convert TSV files to CSV format
+3. Process CSV files and insert data into PostgreSQL
+
+For more details, see `scripts/download_data.sh` and `scripts/process_imdb_data.py`.
+
+## Database Schema
+
+The PostgreSQL database includes the following main tables:
+
+- `movies`: Store movie information
+- `persons`: Store information about people involved in movies
+- `movie_crew`: Link movies with their crew members
+- `users`: Store user information
+- `viewing_history`: Track user viewing history
+
+For the complete schema, refer to `src/database/schema.sql`.
+
+## Recommendation Algorithm
+
+The system uses a content-based recommendation algorithm, which considers:
+
+- Movie genres
+- User viewing history
+- Movie popularity (based on number of votes)
+
+The algorithm calculates similarity between movies using TF-IDF vectorization and cosine similarity.
+
+For implementation details, see `src/recommender/content_based.py`.
+
+## Docker Commands
+
+Here are some useful Docker commands for managing the database:
+
+- Start the database: `docker-compose up -d`
+- Stop the database: `docker-compose down`
+- View database logs: `docker-compose logs db`
+- Access the PostgreSQL shell:
+  ```
+  docker-compose exec db psql -U postgres -d recommendation_engine
+  ```
+
+Remember to stop the Docker container when you're done working on the project to free up resources.
+
+## Testing
+
+(Note: Comprehensive tests are not yet implemented)
+
+To run tests (once implemented):
+
 ```
-python scripts/generate_user_data.py
+python -m unittest discover tests
 ```
-This will create synthetic users and viewing history in the database.
 
-### Step 3: Start the API Server
+## Future Improvements
 
-Run the Flask application:
-```
-python src/api/main.py
-```
-The API server will start, typically on `http://localhost:5000`.
-
-## How It Works
-
-1. **Data Ingestion**:
-   - IMDb data is downloaded and processed to populate the `movies`, `persons`, and `movie_crew` tables.
-   - Synthetic user data and viewing history are generated to simulate a real-world scenario.
-
-2. **API Endpoints**:
-   - `/movies`: Get a list of movies or search for movies
-   - `/movies/<movie_id>`: Get details of a specific movie
-   - `/users/<user_id>`: Get user information
-   - `/users/<user_id>/viewing_history`: Get a user's viewing history
-   - `/users/<user_id>/recommendations`: Get personalized movie recommendations for a user
-   - `/movies/<movie_id>/similar`: Get movies similar to a given movie
-
-3. **Recommendation System**:
-   - The content-based recommender uses TF-IDF vectorization on movie titles and genres.
-   - Cosine similarity is calculated between movies to find similar content.
-   - For user recommendations, the system considers the user's viewing history and finds similar movies.
-   - For movie similarity, it compares a given movie with all other movies in the database.
-
-## Testing the API
-
-You can use tools like cURL or Postman to test the API endpoints. Here are some example requests:
-
-1. Get a list of movies:
-   ```
-   GET http://localhost:5000/movies?limit=10&offset=0
-   ```
-
-2. Search for movies:
-   ```
-   GET http://localhost:5000/movies/search?query=inception
-   ```
-
-3. Get user recommendations (replace `<user_id>` with an actual UUID):
-   ```
-   GET http://localhost:5000/users/<user_id>/recommendations
-   ```
-
-4. Get similar movies (replace `<movie_id>` with an actual movie ID):
-   ```
-   GET http://localhost:5000/movies/<movie_id>/similar
-   ```
-
-## Next Steps
-
-1. Implement user authentication and authorization.
-2. Add a simple frontend to interact with the API.
-3. Implement caching to improve performance.
-4. Add more advanced recommendation algorithms (e.g., collaborative filtering).
-5. Set up unit tests and integration tests.
+- Implement user authentication and authorization
+- Develop a frontend interface for the recommender system
+- Add collaborative filtering to the recommendation algorithm
+- Implement caching to improve API performance
+- Set up continuous integration and deployment (CI/CD)
+- Add comprehensive unit and integration tests
