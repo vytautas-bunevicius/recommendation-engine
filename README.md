@@ -175,6 +175,9 @@ python -m unittest discover tests
 
 ## Future Improvements
 
+export FLASK_APP=src.api.main
+
+
 - Implement user authentication and authorization
 - Develop a frontend interface for the recommender system
 - Add collaborative filtering to the recommendation algorithm

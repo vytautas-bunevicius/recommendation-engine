@@ -6,10 +6,12 @@ Provides endpoints to retrieve movie information and search for movies.
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+from flask_cors import CORS
 
 from src.database.connection import get_db_connection
 
 movies_bp = Blueprint('movies', __name__)
+CORS(movies_bp)
 
 
 @movies_bp.route('/movies', methods=['GET'])

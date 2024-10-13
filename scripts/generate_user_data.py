@@ -57,7 +57,7 @@ def generate_viewing_history(
         user_id = random.choice(user_ids)
         movie_id = random.choice(movie_ids)
         watch_date = fake.date_between(start_date='-1y', end_date='today')
-        watch_duration = random.randint(10, 180)  # 10 to 180 minutes
+        watch_duration = random.randint(10, 180)  
         viewing_history.append((user_id, movie_id, watch_date, watch_duration))
     execute_batch(cursor, """
         INSERT INTO viewing_history (user_id, movie_id, watch_date, watch_duration)
