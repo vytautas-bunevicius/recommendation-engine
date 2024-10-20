@@ -1,6 +1,6 @@
 """API module for handling recommendation-related endpoints."""
 
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -13,9 +13,9 @@ router = APIRouter()
 class RecommendedMovie(BaseModel):
     id: str
     title: str
-    genres: str
-    avg_rating: float
-    start_year: int
+    genres: Optional[str] = None
+    avg_rating: Optional[float] = None
+    start_year: Optional[int] = None
 
 # Dependency to get the recommender
 def get_recommender():
@@ -29,17 +29,40 @@ def get_recommendations(
     recommender = Depends(get_recommender),
 ) -> Any:
     """Get personalized movie recommendations for a user."""
+    if recommender is None:
+        raise HTTPException(status_code=500, detail="Recommender system not initialized.")
+
     conn = get_db_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail="Database connection failed.")
     cursor = conn.cursor()
 
     try:
         recommendations = recommender.get_content_based_recommendations(cursor, user_id)
-        return [RecommendedMovie(**movie) for movie in recommendations]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
         cursor.close()
         conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    cursor.close()
+    conn.close()
+
+    if not recommendations:
+        raise HTTPException(status_code=404, detail="No recommendations found.")
+
+    # Convert to list of RecommendedMovie
+    recommended_movies = []
+    for movie in recommendations:
+        movie_dict = {
+            "id": movie[0],
+            "title": movie[1],
+            "genres": movie[2],
+            "avg_rating": movie[3],
+            "start_year": movie[4],
+        }
+        recommended_movies.append(movie_dict)
+
+    return recommended_movies
 
 @router.get("/movies/{movie_id}/similar", response_model=List[RecommendedMovie])
 def get_similar_movies(
@@ -48,14 +71,37 @@ def get_similar_movies(
     recommender = Depends(get_recommender),
 ) -> Any:
     """Get movies similar to a given movie."""
+    if recommender is None:
+        raise HTTPException(status_code=500, detail="Recommender system not initialized.")
+
     conn = get_db_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail="Database connection failed.")
     cursor = conn.cursor()
 
     try:
         similar_movies = recommender.get_similar_movies(cursor, movie_id, limit)
-        return [RecommendedMovie(**movie) for movie in similar_movies]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
         cursor.close()
         conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    cursor.close()
+    conn.close()
+
+    if not similar_movies:
+        raise HTTPException(status_code=404, detail="No similar movies found.")
+
+    # Convert to list of RecommendedMovie
+    similar_movies_list = []
+    for movie in similar_movies:
+        movie_dict = {
+            "id": movie[0],
+            "title": movie[1],
+            "genres": movie[2],
+            "avg_rating": movie[3],
+            "start_year": movie[4],
+        }
+        similar_movies_list.append(movie_dict)
+
+    return similar_movies_list

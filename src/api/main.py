@@ -1,4 +1,7 @@
-from fastapi import FastAPI
+# src/api/main.py
+
+import logging
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -28,16 +31,16 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins,  # Update as per deployment
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API routers
+# Include API routers without redundant prefixes
 app.include_router(movies_router, prefix="/movies", tags=["Movies"])
 app.include_router(users_router, prefix="/users", tags=["Users"])
-app.include_router(recommendations_router, prefix="/recommendations", tags=["Recommendations"])
+app.include_router(recommendations_router, tags=["Recommendations"])  # Removed prefix
 
 # Mount static files
 current_dir = Path(__file__).resolve().parent  # src/api
@@ -55,16 +58,21 @@ async def serve_ui():
 @app.on_event("startup")
 def startup_event():
     """Initialize the content-based recommender system."""
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=DictCursor)  # Use DictCursor for dictionary-like access
     try:
+        conn = get_db_connection()
+        if conn is None:
+            raise RuntimeError("Failed to connect to the database.")
+        cursor = conn.cursor(cursor_factory=DictCursor)  # Use DictCursor for dictionary-like access
         app.state.recommender = ContentBasedRecommender(cursor)
-        print("ContentBasedRecommender initialized successfully.")
+        logging.info("ContentBasedRecommender initialized successfully.")
     except Exception as e:
-        print(f"Error initializing ContentBasedRecommender: {e}")
+        logging.error(f"Error initializing ContentBasedRecommender: {e}")
+        raise e
     finally:
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 # Run the application
 if __name__ == "__main__":

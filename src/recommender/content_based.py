@@ -89,8 +89,8 @@ class ContentBasedRecommender:
             logging.warning('No valid movies in user history')
             return self.get_popular_movies(cursor, limit)
 
-        user_profile = np.mean(self.tfidf_matrix[user_movie_indices], axis=0)
-        cosine_similarities = cosine_similarity(user_profile, self.tfidf_matrix).flatten()
+        user_profile = np.mean(self.tfidf_matrix[user_movie_indices].toarray(), axis=0)
+        cosine_similarities = cosine_similarity([user_profile], self.tfidf_matrix.toarray()).flatten()
 
         user_seen_movie_ids = {movie['id'] for movie in user_movies}
         similar_indices = np.argsort(-cosine_similarities)
@@ -138,9 +138,9 @@ class ContentBasedRecommender:
             return []
 
         target_index = self.movie_id_to_index[movie_id]
-        target_vector = self.tfidf_matrix[target_index]
+        target_vector = self.tfidf_matrix[target_index].toarray()
 
-        cosine_similarities = cosine_similarity(target_vector, self.tfidf_matrix).flatten()
+        cosine_similarities = cosine_similarity(target_vector, self.tfidf_matrix.toarray()).flatten()
         similar_indices = np.argsort(-cosine_similarities)
 
         recommendations = []

@@ -38,6 +38,7 @@ input, select, button {
     padding: 0.5rem 1rem;
     margin-right: 1rem;
     font-size: 1rem;
+    border-radius: 4px;
 }
 
 button {

@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = ''; // Use relative URLs
 
 async function fetchAPI(endpoint, method = 'GET', body = null) {
     const options = {
@@ -12,11 +12,17 @@ async function fetchAPI(endpoint, method = 'GET', body = null) {
         options.body = JSON.stringify(body);
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
-    if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    try {
+        const response = await fetch(endpoint, options);
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        }
+        return await response.json();
+    } catch (error) {
+        console.error(`Error fetching ${endpoint}:`, error);
+        throw error;
     }
-    return response.json();
 }
 
 function showLoading(elementId) {
@@ -42,6 +48,7 @@ async function loadUsers() {
         });
     } catch (error) {
         console.error('Error loading users:', error);
+        alert('Failed to load users. Please try again later.');
     }
 }
 
@@ -66,7 +73,7 @@ async function getRecommendations() {
 }
 
 async function searchMovies() {
-    const query = document.getElementById('search-query').value;
+    const query = document.getElementById('search-query').value.trim();
     if (!query) {
         alert('Please enter a search query');
         return;
@@ -76,7 +83,6 @@ async function searchMovies() {
     try {
         const movies = await fetchAPI(`/movies/search?query=${encodeURIComponent(query)}`);
         console.log('Search results:', movies);
-        console.log('Calling displayMovies with:', movies, 'search-results');
         displayMovies(movies, 'search-results');
     } catch (error) {
         console.error('Error searching movies:', error);
@@ -120,13 +126,13 @@ function displayMovies(movies, containerId) {
     }
 
     container.innerHTML = movies.map(movie => {
-        // Check if it's a viewing history item
-        if (movie.movie_id) {
+        // Check if it's a viewing history item (has watch_date)
+        if (movie.watch_date) {
             return `
                 <div class="movie-item">
                     <h3>${movie.title || 'No Title'}</h3>
-                    <p>Watched on: ${movie.watch_date ? new Date(movie.watch_date).toLocaleDateString() : 'Unknown'}</p>
-                    <p>Duration: ${movie.watch_duration || 'Unknown'} minutes</p>
+                    <p>Watched on: ${new Date(movie.watch_date).toLocaleDateString()}</p>
+                    <p>Duration: ${movie.watch_duration} minutes</p>
                 </div>
             `;
         } else {
