@@ -1,4 +1,7 @@
-"""Database connection module for the recommendation_engine project."""
+"""Database connection module for the recommendation_engine project.
+
+This module provides functions to establish and close connections to the AWS RDS PostgreSQL database.
+"""
 
 import os
 from typing import Optional
@@ -8,6 +11,7 @@ from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
 load_dotenv()
+
 
 def get_db_connection() -> Optional[psycopg2.extensions.connection]:
     """Establishes and returns a connection to the AWS RDS PostgreSQL database.
@@ -31,6 +35,7 @@ def get_db_connection() -> Optional[psycopg2.extensions.connection]:
     except psycopg2.Error as e:
         print(f"Unable to connect to the database: {e}")
         return None
+
 
 def close_db_connection(conn: Optional[psycopg2.extensions.connection]) -> None:
     """Closes the given database connection.
