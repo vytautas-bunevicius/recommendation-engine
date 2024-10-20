@@ -90,18 +90,19 @@ class DatabaseAPI:
     def execute_many(self, query: str, params_list: List[Tuple]) -> int:
         """Executes a batch write operation on the database.
 
-        This method is useful for inserting or updating multiple rows efficiently.
+            This method is useful for inserting or updating multiple rows efficiently.
 
-        Args:
-            query: The SQL query string to execute.
-            params_list: A list of tuples, where each tuple contains parameters for one execution of the query.
+            Args:
+                query: The SQL query string to execute.
+                params_list: A list of tuples, where each tuple contains parameters
+                    for one execution of the query.
 
-        Returns:
-            The total number of rows affected by the batch operation.
+            Returns:
+                The total number of rows affected by the batch operation.
 
-        Raises:
-            psycopg2.Error: If there's an error executing the batch operation.
-        """
+            Raises:
+                psycopg2.Error: If there's an error executing the batch operation.
+            """
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 cur.executemany(query, params_list)

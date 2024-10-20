@@ -1,7 +1,7 @@
 """API module for handling user-related endpoints.
 
-This module provides endpoints for retrieving user information, managing viewing history,
-and handling user-related operations in the Movie Recommender system.
+This module provides endpoints for retrieving user information, managing viewing
+history, and handling user-related operations in the Movie Recommender system.
 """
 
 import logging
@@ -40,7 +40,8 @@ class ViewingHistoryItem(BaseModel):
 
 
 class ViewingHistoryCreate(BaseModel):
-    """Pydantic model representing the data required to create a viewing history entry."""
+    """Pydantic model representing the data required to create a viewing history
+    entry."""
 
     movie_id: str
     watch_date: datetime
@@ -55,7 +56,8 @@ def get_all_users() -> List[Dict[str, Any]]:
         List[Dict[str, Any]]: A list of users with their basic information.
 
     Raises:
-        HTTPException: If there is an error connecting to the database or fetching users.
+        HTTPException: If there is an error connecting to the database or
+        fetching users.
     """
     conn = get_db_connection()
     if conn is None:
@@ -88,7 +90,8 @@ def get_user(user_id: str = Path(..., description="The UUID of the user")) -> Di
         Dict[str, Any]: A dictionary containing the user's detailed information.
 
     Raises:
-        HTTPException: If there is an error connecting to the database or fetching the user.
+        HTTPException: If there is an error connecting to the database or
+        fetching the user.
     """
     conn = get_db_connection()
     if conn is None:
@@ -119,7 +122,9 @@ def get_user(user_id: str = Path(..., description="The UUID of the user")) -> Di
 
 
 @router.get("/{user_id}/viewing_history", response_model=List[ViewingHistoryItem])
-def get_user_viewing_history(user_id: str = Path(..., description="The UUID of the user")) -> List[Dict[str, Any]]:
+def get_user_viewing_history(
+    user_id: str = Path(..., description="The UUID of the user")
+) -> List[Dict[str, Any]]:
     """Retrieve a user's viewing history.
 
     Args:
@@ -129,7 +134,8 @@ def get_user_viewing_history(user_id: str = Path(..., description="The UUID of t
         List[Dict[str, Any]]: A list of viewing history items for the user.
 
     Raises:
-        HTTPException: If there is an error connecting to the database or fetching the viewing history.
+        HTTPException: If there is an error connecting to the database or
+        fetching the viewing history.
     """
     conn = get_db_connection()
     if conn is None:
@@ -180,13 +186,15 @@ def add_viewing_history(
 
     Args:
         user_id (str): The unique identifier of the user.
-        viewing_history (ViewingHistoryCreate): The viewing history data to be added.
+        viewing_history (ViewingHistoryCreate): The viewing history data to be
+        added.
 
     Returns:
         Dict[str, str]: A message indicating the success of the operation.
 
     Raises:
-        HTTPException: If there is an error connecting to the database, validating the user or movie, or inserting the viewing history.
+        HTTPException: If there is an error connecting to the database,
+        validating the user or movie, or inserting the viewing history.
     """
     conn = get_db_connection()
     if conn is None:
@@ -225,7 +233,8 @@ def add_viewing_history(
     try:
         cursor.execute(
             insert_query,
-            (user_id, viewing_history.movie_id, viewing_history.watch_date, viewing_history.watch_duration),
+            (user_id, viewing_history.movie_id, viewing_history.watch_date,
+             viewing_history.watch_duration),
         )
         conn.commit()
     except Exception as e:

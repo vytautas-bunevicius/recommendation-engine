@@ -1,7 +1,9 @@
 """Database connection module for the recommendation_engine project.
 
-This module provides functions to establish and close connections to the AWS RDS PostgreSQL database.
+This module provides functions to establish and close connections to the AWS
+RDS PostgreSQL database.
 """
+
 
 import os
 from typing import Optional

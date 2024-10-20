@@ -41,21 +41,28 @@ def get_movies(
     movie_type: str = Query("movie"),
     min_votes: int = Query(1000, ge=0),
 ):
-    """Retrieve a list of movies based on query parameters.
+    """
+    Retrieve a list of movies based on query parameters.
 
     Args:
         limit (int): The maximum number of movies to return. Defaults to 10.
-        offset (int): The number of movies to skip before starting to collect the result set. Defaults to 0.
-        sort (str): The field to sort the movies by. Options are 'popularity', 'rating', or 'year'. Defaults to 'popularity'.
-        order (str): The order of sorting, either 'asc' for ascending or 'desc' for descending. Defaults to 'desc'.
-        movie_type (str): The type of media to filter by, e.g., 'movie' or 'series'. Defaults to 'movie'.
-        min_votes (int): The minimum number of votes a movie must have to be included. Defaults to 1000.
+        offset (int): The number of movies to skip before starting to collect the
+            result set. Defaults to 0.
+        sort (str): The field to sort the movies by. Options are 'popularity',
+            'rating', or 'year'. Defaults to 'popularity'.
+        order (str): The order of sorting, either 'asc' for ascending or 'desc'
+            for descending. Defaults to 'desc'.
+        movie_type (str): The type of media to filter by, e.g., 'movie' or 'series'.
+            Defaults to 'movie'.
+        min_votes (int): The minimum number of votes a movie must have to be
+            included. Defaults to 1000.
 
     Returns:
         List[Movie]: A list of movies matching the query parameters.
 
     Raises:
-        HTTPException: If an invalid order parameter is provided or if the database connection/query fails.
+        HTTPException: If an invalid order parameter is provided or if the database
+            connection/query fails.
     """
     logger.info(
         "Fetching movies with params: limit=%s, offset=%s, sort=%s, order=%s, movie_type=%s, min_votes=%s",
