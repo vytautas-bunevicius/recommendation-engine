@@ -1,25 +1,98 @@
-"""
-Module for processing movie data and importing into a PostgreSQL database.
+"""Module for processing movie data and importing it into an AWS RDS PostgreSQL database.
 
-This script reads CSV files containing movie data, processes them, and imports
-the data into a PostgreSQL database. It handles data cleaning, type conversion,
-and batch insertion to optimize performance while avoiding duplicate entries.
-The script is designed to be idempotent, allowing multiple runs without
-creating duplicate data.
+This script efficiently reads multiple large CSV files containing movie data,
+processes them in parallel batches to maintain data integrity, and imports the data into
+an AWS RDS PostgreSQL database. It handles data cleaning, type conversion, and
+batch insertion to optimize performance while avoiding duplicate entries. The
+script is designed to be idempotent, allowing multiple runs without creating
+duplicate data. It leverages connection pooling for efficient database interactions,
+uses Pydantic for data validation, and incorporates environment variable configurations
+and enhanced logging for monitoring.
+
+Usage:
+    python3 scripts/process_imdb_data.py
 """
 
 import csv
 import logging
-from typing import Any, Optional, Tuple
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Generator, List, Optional, Tuple, Set
 
 import psycopg2
-from psycopg2.extensions import connection, cursor
+from psycopg2 import pool
 from psycopg2.extras import execute_values
+from dotenv import load_dotenv
+from pydantic import BaseModel, ValidationError, field_validator
+
+
+load_dotenv()
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s',
+    handlers=[
+        logging.FileHandler("data_processing.log"),
+        logging.StreamHandler()
+    ]
 )
+
+DATA_DIR: str = os.getenv('DATA_DIR', 'data')
+BATCH_SIZE: int = int(os.getenv('BATCH_SIZE', '5000'))
+MAX_WORKERS: int = int(os.getenv('MAX_WORKERS', '5'))
+MAX_ENTRIES_PER_FILE: int = 100000
+
+DB_USER: str = os.getenv('DB_USER')
+DB_PASSWORD: str = os.getenv('DB_PASSWORD')
+DB_HOST: str = os.getenv('DB_HOST')
+DB_PORT: str = os.getenv('DB_PORT', '5432')
+DB_NAME: str = os.getenv('DB_NAME')
+
+
+class Movie(BaseModel):
+    """Model representing a movie entity."""
+
+    id: str
+    title: str
+    original_title: Optional[str]
+    type: Optional[str]
+    is_adult: Optional[bool]
+    start_year: Optional[int]
+    end_year: Optional[int]
+    runtime: Optional[int]
+    genres: Optional[str]
+
+    @field_validator('is_adult', mode='before')
+    def validate_is_adult(cls, value: Any) -> Optional[bool]:
+        """Validate and convert the 'is_adult' field to a boolean."""
+        return value == '1' if isinstance(value, str) else value
+
+
+class Rating(BaseModel):
+    """Model representing a movie rating."""
+
+    movie_id: str
+    avg_rating: float
+    num_votes: int
+
+
+class Person(BaseModel):
+    """Model representing a person (e.g., actor, director)."""
+
+    id: str
+    name: str
+    birth_year: Optional[int]
+    death_year: Optional[int]
+    professions: Optional[str]
+
+
+class Crew(BaseModel):
+    """Model representing a crew relationship between a movie and a person."""
+
+    movie_id: str
+    person_id: str
+    role: str
 
 
 def clean_value(
@@ -27,7 +100,16 @@ def clean_value(
     convert_to_int: bool = False,
     convert_to_bool: bool = False
 ) -> Optional[Any]:
-    """Clean and convert a string value."""
+    """Clean and convert a string value.
+
+    Args:
+        value: The input string to clean and potentially convert.
+        convert_to_int: If True, attempt to convert the value to an integer.
+        convert_to_bool: If True, convert the value to a boolean.
+
+    Returns:
+        The cleaned and potentially converted value, or None if the input is invalid.
+    """
     if value == '\\N':
         return None
     if convert_to_bool:
@@ -40,425 +122,665 @@ def clean_value(
     return value
 
 
-def process_title_basics(cur: cursor, conn: connection) -> Tuple[int, int]:
-    """Process the title.basics.csv file and insert/update data in the database."""
+def read_csv_in_batches(
+    file_path: str,
+    has_header: bool = True,
+    max_entries: Optional[int] = None
+) -> Generator[List[List[str]], None, None]:
+    """Generator to read a CSV file in batches, optionally limiting to max_entries.
+
+    Args:
+        file_path: The path to the CSV file.
+        has_header: Indicates if the CSV file has a header row.
+        max_entries: The maximum number of rows to read from the CSV file.
+
+    Yields:
+        A batch of rows from the CSV file.
+    """
+    with open(file_path, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file)
+        if has_header:
+            next(reader, None)
+        batch: List[List[str]] = []
+        count = 0
+        for row in reader:
+            if row:
+                batch.append(row)
+                count += 1
+                if len(batch) == BATCH_SIZE:
+                    yield batch
+                    batch = []
+                if max_entries and count >= max_entries:
+                    break
+        if batch and (not max_entries or count <= max_entries):
+            yield batch
+
+
+def insert_into_db(
+    insert_query: str,
+    data: List[Tuple],
+    cursor: psycopg2.extensions.cursor
+) -> int:
+    """Execute a batch insert into the database and return the number of inserted rows.
+
+    Args:
+        insert_query: The SQL insert query with a RETURNING clause.
+        data: The data to insert.
+        cursor: The database cursor.
+
+    Returns:
+        The number of rows successfully inserted.
+    """
+    execute_values(cursor, insert_query, data)
+    inserted_rows = cursor.fetchall()
+    inserted_ids = [row[0] for row in inserted_rows]
+    logging.debug(f"Inserted IDs: {inserted_ids}")
+    return len(inserted_rows)
+
+
+def get_existing_ids(
+    table: str,
+    db_pool: pool.SimpleConnectionPool
+) -> Set[str]:
+    """Fetch existing IDs from the specified table.
+
+    Args:
+        table: The name of the table to fetch IDs from.
+        db_pool: The database connection pool.
+
+    Returns:
+        A set of existing IDs in the specified table.
+    """
+    conn = db_pool.getconn()
     try:
-        with open('data/title.basics.csv', 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            next(reader)
-            batch_size = 10000
-            data_batch = []
-            total_processed = 0
-            new_records = 0
-            updated_records = 0
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT id FROM {table}")
+            return set(row[0] for row in cur.fetchall())
+    finally:
+        db_pool.putconn(conn)
 
-            for i, row in enumerate(reader, start=1):
+
+def process_batch_title_basics(
+    batch: List[List[str]],
+    insert_query: str,
+    db_pool: pool.SimpleConnectionPool,
+    batch_number: int,
+    existing_ids: Set[str],
+    existing_ids_lock: threading.Lock
+) -> Tuple[int, int]:
+    """Process a single batch from title.basics.csv.
+
+    Args:
+        batch: The batch of rows to process.
+        insert_query: The SQL insert query for movies.
+        db_pool: The database connection pool.
+        batch_number: The batch number for logging.
+        existing_ids: A set of existing movie IDs.
+        existing_ids_lock: A threading.Lock object for synchronizing access to existing_ids.
+
+    Returns:
+        A tuple containing the count of inserted and skipped records.
+    """
+    inserted, skipped = 0, 0
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            data_batch: List[Tuple[Any, ...]] = []
+            for row in batch:
+                if len(row) < 9:
+                    logging.warning(f"Batch {batch_number}: Insufficient columns in row: {row}")
+                    continue
                 try:
-                    if len(row) < 9:
-                        logging.warning(f"Row {i} in title.basics.csv has insufficient columns: {row}")
-                        continue
-                    data_batch.append((
-                        row[0],  # id
-                        row[2],  # title
-                        row[3],  # original_title
-                        row[1],  # type
-                        clean_value(row[4], convert_to_bool=True),  # is_adult
-                        clean_value(row[5], convert_to_int=True),  # start_year
-                        clean_value(row[6], convert_to_int=True),  # end_year
-                        clean_value(row[7], convert_to_int=True),  # runtime
-                        row[8]   # genres
-                    ))
-                    if len(data_batch) >= batch_size:
-                        n, u = insert_or_update_movies(cur, data_batch)
-                        new_records += n
-                        updated_records += u
-                        conn.commit()
-                        total_processed += len(data_batch)
-                        logging.info(f"Processed {total_processed} rows from title.basics.csv")
-                        data_batch = []
-                except Exception as e:
-                    logging.error(f"Error processing row {i} in title.basics.csv: {e}")
-                    logging.error(f"Problematic row: {row}")
-                    conn.rollback()
-
+                    movie = Movie(
+                        id=row[0],
+                        title=row[2],
+                        original_title=row[3],
+                        type=row[1],
+                        is_adult=clean_value(row[4], convert_to_bool=True),
+                        start_year=clean_value(row[5], convert_to_int=True),
+                        end_year=clean_value(row[6], convert_to_int=True),
+                        runtime=clean_value(row[7], convert_to_int=True),
+                        genres=row[8]
+                    )
+                    with existing_ids_lock:
+                        if movie.id not in existing_ids:
+                            data_batch.append((
+                                movie.id,
+                                movie.title,
+                                movie.original_title,
+                                movie.type,
+                                movie.is_adult,
+                                movie.start_year,
+                                movie.end_year,
+                                movie.runtime,
+                                movie.genres
+                            ))
+                            existing_ids.add(movie.id)
+                        else:
+                            skipped += 1
+                except ValidationError as ve:
+                    logging.error(f"Batch {batch_number}: Validation error for row {row}: {ve}")
             if data_batch:
-                n, u = insert_or_update_movies(cur, data_batch)
-                new_records += n
-                updated_records += u
+                inserted = insert_into_db(insert_query, data_batch, cur)
                 conn.commit()
-                total_processed += len(data_batch)
-
-        logging.info(f"Total rows processed from title.basics.csv: {total_processed}")
-        logging.info(f"New records inserted: {new_records}")
-        logging.info(f"Existing records updated: {updated_records}")
-        return new_records, updated_records
+                logging.info(f"Batch {batch_number}: Inserted {inserted} new movies, skipped {skipped}")
     except Exception as e:
         conn.rollback()
-        logging.error(f"An error occurred during title.basics processing: {e}")
-        raise
+        logging.error(f"Batch {batch_number}: Error processing title.basics.csv: {e}", exc_info=True)
+    finally:
+        db_pool.putconn(conn)
+    return inserted, skipped
 
 
-def insert_or_update_movies(cur: cursor, data: list) -> Tuple[int, int]:
-    """Insert new movies or update existing ones."""
-    cur.execute("""
-        CREATE TEMPORARY TABLE temp_movies (
-            id VARCHAR(10),
-            title VARCHAR(512),
-            original_title VARCHAR(512),
-            type VARCHAR(50),
-            is_adult BOOLEAN,
-            start_year INTEGER,
-            end_year INTEGER,
-            runtime INTEGER,
-            genres VARCHAR(255)
-        ) ON COMMIT DROP
-    """)
+def process_title_basics(
+    file_path: str,
+    insert_query: str,
+    db_pool: pool.SimpleConnectionPool,
+    existing_ids_lock: threading.Lock,
+    max_entries: Optional[int] = MAX_ENTRIES_PER_FILE
+) -> Tuple[int, int]:
+    """Process the title.basics.csv file and insert/update data in the database.
 
-    execute_values(cur, """
-        INSERT INTO temp_movies (id, title, original_title, type, is_adult, start_year, end_year, runtime, genres)
-        VALUES %s
-    """, data)
+    Args:
+        file_path: The path to the title.basics.csv file.
+        insert_query: The SQL insert query for movies.
+        db_pool: The database connection pool.
+        existing_ids_lock: A threading.Lock object for synchronizing access to existing_ids.
+        max_entries: The maximum number of entries to process.
 
-    cur.execute("""
-        WITH upsert AS (
-            INSERT INTO movies (id, title, original_title, type, is_adult, start_year, end_year, runtime, genres)
-            SELECT id, title, original_title, type, is_adult, start_year, end_year, runtime, genres
-            FROM temp_movies
-            ON CONFLICT (id) DO UPDATE SET
-                title = EXCLUDED.title,
-                original_title = EXCLUDED.original_title,
-                type = EXCLUDED.type,
-                is_adult = EXCLUDED.is_adult,
-                start_year = EXCLUDED.start_year,
-                end_year = EXCLUDED.end_year,
-                runtime = EXCLUDED.runtime,
-                genres = EXCLUDED.genres
-            RETURNING (xmax = 0) AS inserted
-        )
-        SELECT COUNT(*) FILTER (WHERE inserted), COUNT(*) FILTER (WHERE NOT inserted)
-        FROM upsert
-    """)
+    Returns:
+        A tuple containing the count of new records and skipped duplicates.
+    """
+    logging.info(f"Started processing file: {file_path} with a cap of {max_entries} entries")
+    new_records, skipped_records = 0, 0
+    existing_ids = get_existing_ids('movies', db_pool)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = []
+        for batch_number, batch in enumerate(read_csv_in_batches(file_path, max_entries=max_entries), start=1):
+            futures.append(
+                executor.submit(
+                    process_batch_title_basics,
+                    batch,
+                    insert_query,
+                    db_pool,
+                    batch_number,
+                    existing_ids,
+                    existing_ids_lock
+                )
+            )
+        for future in as_completed(futures):
+            try:
+                inserted, skipped = future.result()
+                new_records += inserted
+                skipped_records += skipped
+            except Exception as e:
+                logging.error(f"Error in processing batch: {e}", exc_info=True)
+    logging.info(f"title.basics.csv - Total New: {new_records}, Total Skipped: {skipped_records}")
+    return new_records, skipped_records
 
-    return cur.fetchone()
 
+def process_batch_title_ratings(
+    batch: List[List[str]],
+    insert_query: str,
+    db_pool: pool.SimpleConnectionPool,
+    batch_number: int,
+    existing_ids: Set[str],
+    existing_ids_lock: threading.Lock
+) -> Tuple[int, int]:
+    """Process a single batch from title.ratings.csv.
 
-def process_title_ratings(cur: cursor, conn: connection) -> Tuple[int, int]:
-    """Process the title.ratings.csv file and update movie ratings."""
+    Args:
+        batch: The batch of rows to process.
+        insert_query: The SQL insert query for movie ratings.
+        db_pool: The database connection pool.
+        batch_number: The batch number for logging.
+        existing_ids: A set of existing movie IDs.
+        existing_ids_lock: A threading.Lock object for synchronizing access to existing_ids.
+
+    Returns:
+        A tuple containing the count of inserted and skipped records.
+    """
+    inserted, skipped = 0, 0
+    conn = db_pool.getconn()
     try:
-        with open('data/title.ratings.csv', 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            next(reader)
-            batch_size = 10000
-            data_batch = []
-            total_processed = 0
-            new_ratings = 0
-            updated_ratings = 0
-
-            for i, row in enumerate(reader, start=1):
+        with conn.cursor() as cur:
+            data_batch: List[Tuple[Any, ...]] = []
+            for row in batch:
+                if len(row) < 3:
+                    logging.warning(f"Batch {batch_number}: Insufficient columns in row: {row}")
+                    continue
                 try:
-                    if len(row) < 3:
-                        logging.warning(f"Row {i} in title.ratings.csv has insufficient columns: {row}")
-                        continue
-                    data_batch.append((
-                        row[0],  # movie_id
-                        float(row[1]),  # avg_rating
-                        int(row[2])  # num_votes
-                    ))
-                    if len(data_batch) >= batch_size:
-                        n, u = update_movie_ratings(cur, data_batch)
-                        new_ratings += n
-                        updated_ratings += u
-                        conn.commit()
-                        total_processed += len(data_batch)
-                        logging.info(f"Processed {total_processed} rows from title.ratings.csv")
-                        data_batch = []
-                except Exception as e:
-                    logging.error(f"Error processing row {i} in title.ratings.csv: {e}")
-                    logging.error(f"Problematic row: {row}")
-                    conn.rollback()
-
+                    rating = Rating(
+                        movie_id=row[0],
+                        avg_rating=float(row[1]),
+                        num_votes=int(row[2])
+                    )
+                    with existing_ids_lock:
+                        if rating.movie_id in existing_ids:
+                            data_batch.append((
+                                rating.movie_id,
+                                rating.avg_rating,
+                                rating.num_votes
+                            ))
+                        else:
+                            skipped += 1
+                except (ValueError, ValidationError) as ve:
+                    logging.error(f"Batch {batch_number}: Validation error for row {row}: {ve}")
             if data_batch:
-                n, u = update_movie_ratings(cur, data_batch)
-                new_ratings += n
-                updated_ratings += u
+                inserted = insert_into_db(insert_query, data_batch, cur)
                 conn.commit()
-                total_processed += len(data_batch)
-
-        logging.info(f"Total rows processed from title.ratings.csv: {total_processed}")
-        logging.info(f"New ratings added: {new_ratings}")
-        logging.info(f"Existing ratings updated: {updated_ratings}")
-        return new_ratings, updated_ratings
+                logging.info(f"Batch {batch_number}: Inserted/Updated {inserted} ratings, skipped {skipped}")
     except Exception as e:
         conn.rollback()
-        logging.error(f"An error occurred during title.ratings processing: {e}")
-        raise
+        logging.error(f"Batch {batch_number}: Error processing title.ratings.csv: {e}", exc_info=True)
+    finally:
+        db_pool.putconn(conn)
+    return inserted, skipped
 
 
-def update_movie_ratings(cur: cursor, data: list) -> Tuple[int, int]:
-    """Update movie ratings or add new ones."""
-    cur.execute("""
-        CREATE TEMPORARY TABLE temp_ratings (
-            movie_id VARCHAR(10),
-            avg_rating FLOAT,
-            num_votes INTEGER
-        ) ON COMMIT DROP
-    """)
+def process_title_ratings(
+    file_path: str,
+    insert_query: str,
+    db_pool: pool.SimpleConnectionPool,
+    max_entries: Optional[int] = MAX_ENTRIES_PER_FILE
+) -> Tuple[int, int]:
+    """Process the title.ratings.csv file and update movie ratings.
 
-    execute_values(cur, """
-        INSERT INTO temp_ratings (movie_id, avg_rating, num_votes)
-        VALUES %s
-    """, data)
+    Args:
+        file_path: The path to the title.ratings.csv file.
+        insert_query: The SQL insert query for movie ratings.
+        db_pool: The database connection pool.
+        max_entries: The maximum number of entries to process.
 
-    cur.execute("""
-        WITH upsert AS (
-            UPDATE movies m
-            SET avg_rating = r.avg_rating,
-                num_votes = r.num_votes
-            FROM temp_ratings r
-            WHERE m.id = r.movie_id
-            RETURNING m.id
-        )
-        SELECT
-            (SELECT COUNT(*) FROM temp_ratings) - COUNT(*) as new_ratings,
-            COUNT(*) as updated_ratings
-        FROM upsert
-    """)
+    Returns:
+        A tuple containing the count of new ratings and skipped duplicates.
+    """
+    logging.info(f"Started processing file: {file_path} with a cap of {max_entries} entries")
+    new_ratings, skipped_ratings = 0, 0
+    existing_ids = get_existing_ids('movies', db_pool)
+    existing_ids_lock = threading.Lock()
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = []
+        for batch_number, batch in enumerate(read_csv_in_batches(file_path, max_entries=max_entries), start=1):
+            futures.append(
+                executor.submit(
+                    process_batch_title_ratings,
+                    batch,
+                    insert_query,
+                    db_pool,
+                    batch_number,
+                    existing_ids,
+                    existing_ids_lock
+                )
+            )
+        for future in as_completed(futures):
+            try:
+                inserted, skipped = future.result()
+                new_ratings += inserted
+                skipped_ratings += skipped
+            except Exception as e:
+                logging.error(f"Error in processing batch: {e}", exc_info=True)
+    logging.info(f"title.ratings.csv - Total New/Updated: {new_ratings}, Total Skipped: {skipped_ratings}")
+    return new_ratings, skipped_ratings
 
-    return cur.fetchone()
 
+def process_batch_name_basics(
+    batch: List[List[str]],
+    insert_query: str,
+    db_pool: pool.SimpleConnectionPool,
+    batch_number: int,
+    existing_ids: Set[str],
+    existing_ids_lock: threading.Lock
+) -> Tuple[int, int]:
+    """Process a single batch from name.basics.csv.
 
-def process_name_basics(cur: cursor, conn: connection) -> Tuple[int, int]:
-    """Process the name.basics.csv file and insert/update data in the database."""
+    Args:
+        batch: The batch of rows to process.
+        insert_query: The SQL insert query for persons.
+        db_pool: The database connection pool.
+        batch_number: The batch number for logging.
+        existing_ids: A set of existing person IDs.
+        existing_ids_lock: A threading.Lock object for synchronizing access to existing_ids.
+
+    Returns:
+        A tuple containing the count of inserted and skipped records.
+    """
+    inserted, skipped = 0, 0
+    conn = db_pool.getconn()
     try:
-        with open('data/name.basics.csv', 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            next(reader)
-            batch_size = 10000
-            data_batch = []
-            total_processed = 0
-            new_persons = 0
-            updated_persons = 0
-
-            for i, row in enumerate(reader, start=1):
+        with conn.cursor() as cur:
+            data_batch: List[Tuple[Any, ...]] = []
+            for row in batch:
+                if len(row) < 6:
+                    logging.warning(f"Batch {batch_number}: Insufficient columns in row: {row}")
+                    continue
                 try:
-                    if len(row) < 6:
-                        logging.warning(f"Row {i} in name.basics.csv has insufficient columns: {row}")
-                        continue
-                    data_batch.append((
-                        row[0],  # id
-                        row[1],  # name
-                        clean_value(row[2], convert_to_int=True),  # birth_year
-                        clean_value(row[3], convert_to_int=True),  # death_year
-                        row[4]  # primary_profession
-                    ))
-                    if len(data_batch) >= batch_size:
-                        n, u = insert_or_update_persons(cur, data_batch)
-                        new_persons += n
-                        updated_persons += u
-                        conn.commit()
-                        total_processed += len(data_batch)
-                        logging.info(f"Processed {total_processed} rows from name.basics.csv")
-                        data_batch = []
-                except Exception as e:
-                    logging.error(f"Error processing row {i} in name.basics.csv: {e}")
-                    logging.error(f"Problematic row: {row}")
-                    conn.rollback()
-
+                    person = Person(
+                        id=row[0],
+                        name=row[1],
+                        birth_year=clean_value(row[2], convert_to_int=True),
+                        death_year=clean_value(row[3], convert_to_int=True),
+                        professions=row[4]
+                    )
+                    with existing_ids_lock:
+                        if person.id not in existing_ids:
+                            data_batch.append((
+                                person.id,
+                                person.name,
+                                person.birth_year,
+                                person.death_year,
+                                person.professions
+                            ))
+                            existing_ids.add(person.id)
+                        else:
+                            skipped += 1
+                except ValidationError as ve:
+                    logging.error(f"Batch {batch_number}: Validation error for row {row}: {ve}")
             if data_batch:
-                n, u = insert_or_update_persons(cur, data_batch)
-                new_persons += n
-                updated_persons += u
+                inserted = insert_into_db(insert_query, data_batch, cur)
                 conn.commit()
-                total_processed += len(data_batch)
-
-        logging.info(f"Total rows processed from name.basics.csv: {total_processed}")
-        logging.info(f"New persons inserted: {new_persons}")
-        logging.info(f"Existing persons updated: {updated_persons}")
-        return new_persons, updated_persons
+                logging.info(f"Batch {batch_number}: Inserted {inserted} new persons, skipped {skipped}")
     except Exception as e:
         conn.rollback()
-        logging.error(f"An error occurred during name.basics processing: {e}")
-        raise
+        logging.error(f"Batch {batch_number}: Error processing name.basics.csv: {e}", exc_info=True)
+    finally:
+        db_pool.putconn(conn)
+    return inserted, skipped
 
 
-def insert_or_update_persons(cur: cursor, data: list) -> Tuple[int, int]:
-    """Insert new persons or update existing ones."""
-    cur.execute("""
-        CREATE TEMPORARY TABLE temp_persons (
-            id VARCHAR(10),
-            name VARCHAR(255),
-            birth_year INTEGER,
-            death_year INTEGER,
-            primary_profession VARCHAR(255)
-        ) ON COMMIT DROP
-    """)
+def process_name_basics(
+    file_path: str,
+    insert_query: str,
+    db_pool: pool.SimpleConnectionPool,
+    existing_ids_lock: threading.Lock,
+    max_entries: Optional[int] = MAX_ENTRIES_PER_FILE
+) -> Tuple[int, int]:
+    """Process the name.basics.csv file and insert/update data in the database.
 
-    execute_values(cur, """
-        INSERT INTO temp_persons (id, name, birth_year, death_year, primary_profession)
-        VALUES %s
-    """, data)
+    Args:
+        file_path: The path to the name.basics.csv file.
+        insert_query: The SQL insert query for persons.
+        db_pool: The database connection pool.
+        existing_ids_lock: A threading.Lock object for synchronizing access to existing_ids.
+        max_entries: The maximum number of entries to process.
 
-    cur.execute("""
-        WITH upsert AS (
-            INSERT INTO persons (id, name, birth_year, death_year, primary_profession)
-            SELECT id, name, birth_year, death_year, primary_profession
-            FROM temp_persons
-            ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                birth_year = EXCLUDED.birth_year,
-                death_year = EXCLUDED.death_year,
-                primary_profession = EXCLUDED.primary_profession
-            RETURNING (xmax = 0) AS inserted
-        )
-        SELECT COUNT(*) FILTER (WHERE inserted), COUNT(*) FILTER (WHERE NOT inserted)
-        FROM upsert
-    """)
+    Returns:
+        A tuple containing the count of new persons and skipped duplicates.
+    """
+    logging.info(f"Started processing file: {file_path} with a cap of {max_entries} entries")
+    new_persons, skipped_persons = 0, 0
+    existing_ids = get_existing_ids('persons', db_pool)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = []
+        for batch_number, batch in enumerate(read_csv_in_batches(file_path, max_entries=max_entries), start=1):
+            futures.append(
+                executor.submit(
+                    process_batch_name_basics,
+                    batch,
+                    insert_query,
+                    db_pool,
+                    batch_number,
+                    existing_ids,
+                    existing_ids_lock
+                )
+            )
+        for future in as_completed(futures):
+            try:
+                inserted, skipped = future.result()
+                new_persons += inserted
+                skipped_persons += skipped
+            except Exception as e:
+                logging.error(f"Error in processing batch: {e}", exc_info=True)
+    logging.info(f"name.basics.csv - Total New: {new_persons}, Total Skipped: {skipped_persons}")
+    return new_persons, skipped_persons
 
-    return cur.fetchone()
 
+def process_batch_title_crew(
+    batch: List[List[str]],
+    insert_query: str,
+    db_pool: pool.SimpleConnectionPool,
+    batch_number: int,
+    existing_movie_ids: Set[str],
+    existing_person_ids: Set[str],
+    movie_ids_lock: threading.Lock,
+    person_ids_lock: threading.Lock
+) -> Tuple[int, int]:
+    """Process a single batch from title.crew.csv.
 
-def process_title_crew(cur: cursor, conn: connection) -> Tuple[int, int]:
-    """Process the title.crew.csv file and insert/update data in the database."""
+    Args:
+        batch: The batch of rows to process.
+        insert_query: The SQL insert query for movie crew.
+        db_pool: The database connection pool.
+        batch_number: The batch number for logging.
+        existing_movie_ids: A set of existing movie IDs.
+        existing_person_ids: A set of existing person IDs.
+        movie_ids_lock: Lock for synchronizing access to existing_movie_ids.
+        person_ids_lock: Lock for synchronizing access to existing_person_ids.
+
+    Returns:
+        A tuple containing the count of inserted and skipped records.
+    """
+    inserted, skipped = 0, 0
+    conn = db_pool.getconn()
     try:
-        with open('data/title.crew.csv', 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            next(reader)
-            batch_size = 10000
-            data_batch = []
-            total_processed = 0
-            new_crew = 0
-            existing_crew = 0
-
-            for i, row in enumerate(reader, start=1):
-                try:
-                    if len(row) < 3:
-                        logging.warning(f"Row {i} in title.crew.csv has insufficient columns: {row}")
+        with conn.cursor() as cur:
+            crew_entries: List[Tuple[str, str, str]] = []
+            for row in batch:
+                if len(row) < 3:
+                    logging.warning(f"Batch {batch_number}: Insufficient columns in row: {row}")
+                    continue
+                movie_id = row[0]
+                with movie_ids_lock:
+                    if movie_id not in existing_movie_ids:
+                        skipped += 1
                         continue
-                    movie_id = row[0]
-                    directors = row[1].split(',') if row[1] != '\\N' else []
-                    writers = row[2].split(',') if row[2] != '\\N' else []
-                    for director_id in directors:
-                        data_batch.append((movie_id, director_id, 'director'))
-                    for writer_id in writers:
-                        data_batch.append((movie_id, writer_id, 'writer'))
-                    if len(data_batch) >= batch_size:
-                        n, e = insert_movie_crew(cur, data_batch)
-                        new_crew += n
-                        existing_crew += e
-                        conn.commit()
-                        total_processed += len(data_batch)
-                        logging.info(f"Processed {total_processed} rows from title.crew.csv")
-                        data_batch = []
-                except Exception as e:
-                    logging.error(f"Error processing row {i} in title.crew.csv: {e}")
-                    logging.error(f"Problematic row: {row}")
-                    conn.rollback()
-
-            if data_batch:
-                n, e = insert_movie_crew(cur, data_batch)
-                new_crew += n
-                existing_crew += e
+                directors = row[1].split(',') if row[1] != '\\N' else []
+                writers = row[2].split(',') if row[2] != '\\N' else []
+                for director_id in directors:
+                    with person_ids_lock:
+                        if director_id in existing_person_ids:
+                            crew_entries.append((movie_id, director_id, 'director'))
+                        else:
+                            logging.warning(f"Batch {batch_number}: Director ID {director_id} not found in persons table.")
+                            skipped += 1
+                for writer_id in writers:
+                    with person_ids_lock:
+                        if writer_id in existing_person_ids:
+                            crew_entries.append((movie_id, writer_id, 'writer'))
+                        else:
+                            logging.warning(f"Batch {batch_number}: Writer ID {writer_id} not found in persons table.")
+                            skipped += 1
+            if crew_entries:
+                inserted = insert_into_db(insert_query, crew_entries, cur)
                 conn.commit()
-                total_processed += len(data_batch)
-
-        logging.info(f"Total crew relationships processed from title.crew.csv: {total_processed}")
-        logging.info(f"New crew relationships inserted: {new_crew}")
-        logging.info(f"Existing crew relationships: {existing_crew}")
-        return new_crew, existing_crew
+                logging.info(f"Batch {batch_number}: Inserted {inserted} new crew relationships, skipped {skipped}")
     except Exception as e:
         conn.rollback()
-        logging.error(f"An error occurred during title.crew processing: {e}")
+        logging.error(f"Batch {batch_number}: Error processing title.crew.csv: {e}", exc_info=True)
+    finally:
+        db_pool.putconn(conn)
+    return inserted, skipped
+
+
+def process_title_crew(
+    file_path: str,
+    insert_query: str,
+    db_pool: pool.SimpleConnectionPool,
+    max_entries: Optional[int] = MAX_ENTRIES_PER_FILE
+) -> Tuple[int, int]:
+    """Process the title.crew.csv file and insert/update data in the database.
+
+    Args:
+        file_path: The path to the title.crew.csv file.
+        insert_query: The SQL insert query for movie crew.
+        db_pool: The database connection pool.
+        max_entries: The maximum number of entries to process.
+
+    Returns:
+        A tuple containing the count of new crew relationships and skipped duplicates.
+    """
+    logging.info(f"Started processing file: {file_path} with a cap of {max_entries} entries")
+    new_crew, skipped_crew = 0, 0
+    existing_movie_ids = get_existing_ids('movies', db_pool)
+    existing_person_ids = get_existing_ids('persons', db_pool)
+    movie_ids_lock = threading.Lock()
+    person_ids_lock = threading.Lock()
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = []
+        for batch_number, batch in enumerate(read_csv_in_batches(file_path, max_entries=max_entries), start=1):
+            futures.append(
+                executor.submit(
+                    process_batch_title_crew,
+                    batch,
+                    insert_query,
+                    db_pool,
+                    batch_number,
+                    existing_movie_ids,
+                    existing_person_ids,
+                    movie_ids_lock,
+                    person_ids_lock
+                )
+            )
+        for future in as_completed(futures):
+            try:
+                inserted, skipped = future.result()
+                new_crew += inserted
+                skipped_crew += skipped
+            except Exception as e:
+                logging.error(f"Error in processing batch: {e}", exc_info=True)
+    logging.info(f"title.crew.csv - Total New: {new_crew}, Total Skipped: {skipped_crew}")
+    return new_crew, skipped_crew
+
+
+def verify_data(db_pool: pool.SimpleConnectionPool) -> None:
+    """Verify the data in the database tables.
+
+    Args:
+        db_pool: The database connection pool.
+    """
+    tables: List[str] = ['movies', 'persons', 'movie_crew', 'movie_ratings']
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            for table in tables:
+                cur.execute(f"SELECT COUNT(*) FROM {table}")
+                count = cur.fetchone()[0]
+                logging.info(f"Total rows in {table} table: {count}")
+    except Exception as e:
+        logging.error(f"Error verifying data: {e}", exc_info=True)
         raise
+    finally:
+        db_pool.putconn(conn)
 
 
-def insert_movie_crew(cur: cursor, data: list) -> Tuple[int, int]:
-    """Insert new movie crew relationships, ignoring existing ones."""
-    cur.execute("""
-        CREATE TEMPORARY TABLE temp_movie_crew (
-            movie_id VARCHAR(10),
-            person_id VARCHAR(10),
-            role VARCHAR(50)
-        ) ON COMMIT DROP
-    """)
+def process_all_files(
+    db_pool: pool.SimpleConnectionPool,
+    max_entries_per_file: int = MAX_ENTRIES_PER_FILE
+) -> None:
+    """Process all CSV files in the correct order to maintain referential integrity.
 
-    execute_values(cur, """
-        INSERT INTO temp_movie_crew (movie_id, person_id, role)
-        VALUES %s
-    """, data)
-
-    cur.execute("""
-        WITH inserted AS (
+    Args:
+        db_pool: The database connection pool.
+        max_entries_per_file: The maximum number of entries to process from each file.
+    """
+    persons_lock = threading.Lock()
+    movies_lock = threading.Lock()
+    tasks: List[Tuple[str, str, Optional[threading.Lock]]] = [
+        (
+            os.path.join(DATA_DIR, 'name.basics.csv'),
+            """
+            INSERT INTO persons (id, name, birth_year, death_year, professions)
+            VALUES %s
+            ON CONFLICT (id) DO NOTHING
+            RETURNING id
+            """,
+            persons_lock
+        ),
+        (
+            os.path.join(DATA_DIR, 'title.basics.csv'),
+            """
+            INSERT INTO movies (
+                id, title, original_title, type, is_adult,
+                start_year, end_year, runtime, genres
+            ) VALUES %s
+            ON CONFLICT (id) DO NOTHING
+            RETURNING id
+            """,
+            movies_lock
+        ),
+        (
+            os.path.join(DATA_DIR, 'title.ratings.csv'),
+            """
+            INSERT INTO movie_ratings (movie_id, avg_rating, num_votes)
+            VALUES %s
+            ON CONFLICT (movie_id) DO UPDATE SET
+                avg_rating = EXCLUDED.avg_rating,
+                num_votes = EXCLUDED.num_votes
+            RETURNING movie_id
+            """,
+            None
+        ),
+        (
+            os.path.join(DATA_DIR, 'title.crew.csv'),
+            """
             INSERT INTO movie_crew (movie_id, person_id, role)
-            SELECT t.movie_id, t.person_id, t.role
-            FROM temp_movie_crew t
-            JOIN movies m ON t.movie_id = m.id
-            JOIN persons p ON t.person_id = p.id
+            VALUES %s
             ON CONFLICT (movie_id, person_id, role) DO NOTHING
-            RETURNING 1
+            RETURNING movie_id
+            """,
+            None
         )
-        SELECT COUNT(*) as new_inserted,
-               (SELECT COUNT(*) FROM temp_movie_crew) - COUNT(*) as already_existing
-        FROM inserted
-    """)
+    ]
 
-    return cur.fetchone()
-
-
-def verify_data(cur: cursor) -> None:
-    """Verify the data in the database tables."""
-    tables = ['movies', 'persons', 'movie_crew']
-    for table in tables:
-        cur.execute(f"SELECT COUNT(*) FROM {table}")
-        count = cur.fetchone()[0]
-        logging.info(f"Total rows in {table} table: {count}")
-
-
-def process_data(conn: connection, cur: cursor) -> None:
-    """Process all data and import into the database."""
-    try:
-        logging.info("Starting data processing")
-
-        logging.info("Processing movies data")
-        new_movies, updated_movies = process_title_basics(cur, conn)
-        logging.info(f"Movies processed: {new_movies} new, {updated_movies} updated")
-
-        logging.info("Processing movie ratings")
-        new_ratings, updated_ratings = process_title_ratings(cur, conn)
-        logging.info(f"Ratings processed: {new_ratings} new, {updated_ratings} updated")
-
-        logging.info("Processing persons data")
-        new_persons, updated_persons = process_name_basics(cur, conn)
-        logging.info(f"Persons processed: {new_persons} new, {updated_persons} updated")
-
-        logging.info("Processing movie crew data")
-        new_crew, existing_crew = process_title_crew(cur, conn)
-        logging.info(f"Crew relationships processed: {new_crew} new, {existing_crew} existing")
-
-        logging.info("Data processing completed successfully")
-        verify_data(cur)
-    except Exception as e:
-        logging.error(f"An error occurred during data processing: {e}")
-        raise
+    for file_path, insert_query, lock in tasks:
+        if os.path.exists(file_path):
+            logging.info(f"Processing file: {file_path}")
+            try:
+                if 'name.basics.csv' in file_path:
+                    process_name_basics(file_path, insert_query, db_pool, lock, max_entries_per_file)
+                elif 'title.basics.csv' in file_path:
+                    process_title_basics(file_path, insert_query, db_pool, lock, max_entries_per_file)
+                elif 'title.ratings.csv' in file_path:
+                    process_title_ratings(file_path, insert_query, db_pool, max_entries_per_file)
+                elif 'title.crew.csv' in file_path:
+                    process_title_crew(file_path, insert_query, db_pool, max_entries_per_file)
+            except Exception as e:
+                logging.error(f"Failed to process file {file_path}: {e}", exc_info=True)
+                continue
+        else:
+            logging.warning(f"File not found: {file_path}")
 
 
 def main() -> None:
     """Main function to initiate data processing."""
-    conn = psycopg2.connect(
-        dbname="recommendation_engine",
-        user="postgres",
-        password="password",
-        host="localhost",
-        port="5432"
-    )
-    cur = conn.cursor()
     try:
-        process_data(conn, cur)
+        db_pool = pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=MAX_WORKERS,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME
+        )
+        logging.info(f"Connected to database: {DB_NAME} at {DB_HOST}:{DB_PORT} as user {DB_USER}")
     except Exception as e:
-        logging.error(f"Fatal error: {e}")
+        logging.error(f"Failed to create database connection pool: {e}", exc_info=True)
+        raise
+
+    try:
+        logging.info("Starting data processing")
+        process_all_files(db_pool)
+        logging.info("Data processing completed successfully")
+        verify_data(db_pool)
+    except psycopg2.Error as e:
+        logging.error(f"Database error: {e}", exc_info=True)
+    except Exception as e:
+        logging.error(f"Fatal error: {e}", exc_info=True)
     finally:
-        cur.close()
-        conn.close()
-        logging.info("Database connection closed")
+        if db_pool:
+            db_pool.closeall()
+            logging.info("Database connection pool closed")
 
 
 if __name__ == "__main__":

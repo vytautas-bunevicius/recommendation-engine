@@ -1,6 +1,7 @@
-"""
-Module providing content-based recommendation functions.
-Includes functions to generate recommendations based on user viewing history and to find similar movies.
+"""Module providing content-based recommendation functions.
+
+Includes a class ContentBasedRecommender that precomputes the TF-IDF matrix
+and generates recommendations based on user viewing history or similar movies.
 """
 
 import logging
@@ -11,162 +12,183 @@ from psycopg2.extensions import cursor
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-def get_content_based_recommendations(
-    cursor: cursor,
-    user_id: str,
-    limit: int = 10
-) -> List[Dict[str, Any]]:
-    """Generates content-based movie recommendations for a user.
 
-    Args:
-        cursor: Database cursor.
-        user_id: The UUID of the user.
-        limit: Number of recommendations to return.
+class ContentBasedRecommender:
+    """Content-based recommender system using TF-IDF and cosine similarity."""
 
-    Returns:
-        List of recommended movies as dictionaries.
-    """
-    logging.info(f"Getting content-based recommendations for user {user_id}")
+    def __init__(self, cursor: cursor) -> None:
+        """Initializes the recommender by precomputing the TF-IDF matrix.
 
-    cursor.execute("""
-        SELECT DISTINCT m.id, m.title, m.genres
-        FROM viewing_history vh
-        JOIN movies m ON vh.movie_id = m.id
-        WHERE vh.user_id = %s
-    """, (user_id,))
-    user_movies = cursor.fetchall()
+        Args:
+            cursor: Database cursor to fetch movie data.
+        """
+        logging.info('Initializing ContentBasedRecommender')
+        cursor.execute(
+            '''
+            SELECT m.id, m.title, m.genres, mr.num_votes
+            FROM movies m
+            JOIN movie_ratings mr ON m.id = mr.movie_id
+            WHERE mr.num_votes > 1000
+            '''
+        )
+        all_movies = cursor.fetchall()
 
-    logging.info(f"User has watched {len(user_movies)} unique movies")
+        self.movie_ids = [movie['id'] for movie in all_movies]
+        self.movie_texts = [
+            f"{movie['title']} {movie['genres']}" for movie in all_movies
+        ]
+        self.movie_id_to_index = {
+            movie_id: idx for idx, movie_id in enumerate(self.movie_ids)
+        }
+        self.index_to_movie_id = {
+            idx: movie_id for idx, movie_id in enumerate(self.movie_ids)
+        }
 
-    if not user_movies:
-        logging.warning(f"No viewing history found for user {user_id}")
-        return get_popular_movies(cursor, limit)
+        logging.info('Computing TF-IDF matrix')
+        self.tfidf = TfidfVectorizer(stop_words='english')
+        self.tfidf_matrix = self.tfidf.fit_transform(self.movie_texts)
+        logging.info('TF-IDF matrix computed')
 
-    cursor.execute("SELECT id, title, genres FROM movies")
-    all_movies = cursor.fetchall()
+    def get_content_based_recommendations(
+        self, cursor: cursor, user_id: str, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Generates content-based movie recommendations for a user.
 
-    logging.info(f"Total movies in database: {len(all_movies)}")
+        Args:
+            cursor: Database cursor.
+            user_id: The UUID of the user.
+            limit: Number of recommendations to return.
 
-    movie_ids = [movie['id'] for movie in all_movies]
-    movie_texts = [f"{movie['title']} {movie['genres']}" for movie in all_movies]
-    movie_id_to_index = {movie_id: idx for idx, movie_id in enumerate(movie_ids)}
+        Returns:
+            A list of recommended movies as dictionaries.
+        """
+        logging.info(f'Getting recommendations for user {user_id}')
+        cursor.execute(
+            """
+            SELECT DISTINCT m.id
+            FROM viewing_history vh
+            JOIN movies m ON vh.movie_id = m.id
+            JOIN movie_ratings mr ON m.id = mr.movie_id
+            WHERE vh.user_id = %s AND mr.num_votes > 1000
+            """,
+            (user_id,),
+        )
+        user_movies = cursor.fetchall()
 
-    tfidf = TfidfVectorizer(stop_words='english')
-    tfidf_matrix = tfidf.fit_transform(movie_texts)
+        if not user_movies:
+            logging.warning(f'No viewing history found for user {user_id}')
+            return self.get_popular_movies(cursor, limit)
 
-    user_movie_indices = [movie_id_to_index[movie['id']] for movie in user_movies if movie['id'] in movie_id_to_index]
-    if not user_movie_indices:
-        logging.warning("No valid movies in user's history")
-        return get_popular_movies(cursor, limit)
+        user_movie_indices = [
+            self.movie_id_to_index[movie['id']]
+            for movie in user_movies
+            if movie['id'] in self.movie_id_to_index
+        ]
 
-    user_movie_vectors = tfidf_matrix[user_movie_indices]
-    cosine_similarities = cosine_similarity(user_movie_vectors, tfidf_matrix)
+        if not user_movie_indices:
+            logging.warning('No valid movies in user history')
+            return self.get_popular_movies(cursor, limit)
 
-    aggregated_similarities = cosine_similarities.mean(axis=0)
+        user_profile = np.mean(self.tfidf_matrix[user_movie_indices], axis=0)
+        cosine_similarities = cosine_similarity(user_profile, self.tfidf_matrix).flatten()
 
-    user_seen_movie_ids = set(movie['id'] for movie in user_movies)
-    similar_indices = np.argsort(-aggregated_similarities)
+        user_seen_movie_ids = {movie['id'] for movie in user_movies}
+        similar_indices = np.argsort(-cosine_similarities)
 
-    recommendations = []
-    for idx in similar_indices:
-        movie_id = movie_ids[idx]
-        if movie_id not in user_seen_movie_ids:
-            recommendations.append((movie_id, aggregated_similarities[idx]))
-        if len(recommendations) >= limit:
-            break
+        recommendations = []
+        for idx in similar_indices:
+            movie_id = self.index_to_movie_id[idx]
+            if movie_id not in user_seen_movie_ids:
+                recommendations.append(movie_id)
+            if len(recommendations) >= limit:
+                break
 
-    recommended_movie_ids = [rec[0] for rec in recommendations]
-    placeholders = ','.join(['%s'] * len(recommended_movie_ids))
-    cursor.execute(f"""
-        SELECT id, title, genres, avg_rating, start_year
-        FROM movies
-        WHERE id IN ({placeholders})
-    """, recommended_movie_ids)
-    recommended_movies = cursor.fetchall()
+        if not recommendations:
+            return self.get_popular_movies(cursor, limit)
 
-    movie_id_to_similarity = {rec[0]: rec[1] for rec in recommendations}
-    recommended_movies.sort(key=lambda x: movie_id_to_similarity[x['id']], reverse=True)
+        placeholders = ','.join(['%s'] * len(recommendations))
+        cursor.execute(
+            f"""
+            SELECT m.id, m.title, m.genres, mr.avg_rating, m.start_year
+            FROM movies m
+            JOIN movie_ratings mr ON m.id = mr.movie_id
+            WHERE m.id IN ({placeholders})
+            ORDER BY mr.avg_rating DESC
+            """,
+            recommendations,
+        )
+        recommended_movies = cursor.fetchall()
+        return recommended_movies
 
-    logging.info(f"Returning {len(recommended_movies)} recommendations")
-    return recommended_movies
+    def get_similar_movies(
+        self, cursor: cursor, movie_id: str, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Finds movies similar to the given movie based on content.
 
-def get_similar_movies(
-    cursor: cursor,
-    movie_id: str,
-    limit: int = 10
-) -> List[Dict[str, Any]]:
-    """Finds movies similar to the given movie based on content.
+        Args:
+            cursor: Database cursor.
+            movie_id: The ID of the target movie.
+            limit: Number of similar movies to return.
 
-    Args:
-        cursor: Database cursor.
-        movie_id: The ID of the target movie.
-        limit: Number of similar movies to return.
+        Returns:
+            A list of similar movies as dictionaries.
+        """
+        if movie_id not in self.movie_id_to_index:
+            logging.warning(f'Movie ID {movie_id} not found in index')
+            return []
 
-    Returns:
-        List of similar movies as dictionaries.
-    """
-    cursor.execute("SELECT id, title, genres FROM movies WHERE id = %s", (movie_id,))
-    target_movie = cursor.fetchone()
+        target_index = self.movie_id_to_index[movie_id]
+        target_vector = self.tfidf_matrix[target_index]
 
-    if not target_movie:
-        return []
+        cosine_similarities = cosine_similarity(target_vector, self.tfidf_matrix).flatten()
+        similar_indices = np.argsort(-cosine_similarities)
 
-    cursor.execute("SELECT id, title, genres FROM movies")
-    all_movies = cursor.fetchall()
+        recommendations = []
+        for idx in similar_indices:
+            if self.index_to_movie_id[idx] != movie_id:
+                recommendations.append(self.index_to_movie_id[idx])
+            if len(recommendations) >= limit:
+                break
 
-    movie_ids = [movie['id'] for movie in all_movies]
-    movie_texts = [f"{movie['title']} {movie['genres']}" for movie in all_movies]
-    movie_id_to_index = {movie_id: idx for idx, movie_id in enumerate(movie_ids)}
+        if not recommendations:
+            return []
 
-    tfidf = TfidfVectorizer(stop_words='english')
-    tfidf_matrix = tfidf.fit_transform(movie_texts)
+        placeholders = ','.join(['%s'] * len(recommendations))
+        cursor.execute(
+            f"""
+            SELECT m.id, m.title, m.genres, mr.avg_rating, m.start_year
+            FROM movies m
+            JOIN movie_ratings mr ON m.id = mr.movie_id
+            WHERE m.id IN ({placeholders})
+            ORDER BY mr.avg_rating DESC
+            """,
+            recommendations,
+        )
+        similar_movies = cursor.fetchall()
+        return similar_movies
 
-    target_index = movie_id_to_index[target_movie['id']]
-    target_vector = tfidf_matrix[target_index]
+    def get_popular_movies(
+        self, cursor: cursor, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Gets popular movies as a fallback recommendation.
 
-    cosine_similarities = cosine_similarity(target_vector, tfidf_matrix).flatten()
+        Args:
+            cursor: Database cursor.
+            limit: Number of movies to return.
 
-    similar_indices = np.argsort(-cosine_similarities)
-
-    recommendations = []
-    for idx in similar_indices:
-        if movie_ids[idx] != target_movie['id']:
-            recommendations.append((movie_ids[idx], cosine_similarities[idx]))
-        if len(recommendations) >= limit:
-            break
-
-    recommended_movie_ids = [rec[0] for rec in recommendations]
-    placeholders = ','.join(['%s'] * len(recommended_movie_ids))
-    cursor.execute(f"""
-        SELECT id, title, genres, avg_rating, start_year
-        FROM movies
-        WHERE id IN ({placeholders})
-    """, recommended_movie_ids)
-    similar_movies = cursor.fetchall()
-
-    movie_id_to_similarity = {rec[0]: rec[1] for rec in recommendations}
-    similar_movies.sort(key=lambda x: movie_id_to_similarity[x['id']], reverse=True)
-
-    return similar_movies
-
-def get_popular_movies(cursor: cursor, limit: int = 10) -> List[Dict[str, Any]]:
-    """Gets popular movies as a fallback recommendation.
-
-    Args:
-        cursor: Database cursor.
-        limit: Number of movies to return.
-
-    Returns:
-        List of popular movies as dictionaries.
-    """
-    logging.info("Fetching popular movies as fallback")
-    cursor.execute("""
-        SELECT id, title, genres, avg_rating, start_year
-        FROM movies
-        WHERE num_votes > 1000
-        ORDER BY avg_rating DESC
-        LIMIT %s
-    """, (limit,))
-    popular_movies = cursor.fetchall()
-    logging.info(f"Returning {len(popular_movies)} popular movies")
-    return popular_movies
+        Returns:
+            A list of popular movies as dictionaries.
+        """
+        logging.info('Fetching popular movies as fallback')
+        cursor.execute(
+            """
+            SELECT m.id, m.title, m.genres, mr.avg_rating, m.start_year
+            FROM movies m
+            JOIN movie_ratings mr ON m.id = mr.movie_id
+            WHERE mr.num_votes > 10000
+            ORDER BY mr.avg_rating DESC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        return cursor.fetchall()

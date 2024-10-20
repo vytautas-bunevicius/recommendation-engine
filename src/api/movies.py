@@ -1,128 +1,113 @@
-"""
-API module for handling movie-related endpoints.
-Provides endpoints to retrieve movie information and search for movies.
-"""
+"""API module for handling movie-related endpoints."""
 
-from typing import Any
+from typing import Any, List
 
-from flask import Blueprint, jsonify, request
-from flask_cors import CORS
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from src.database.connection import get_db_connection
 
-movies_bp = Blueprint('movies', __name__)
-CORS(movies_bp)
+router = APIRouter()
 
+# Pydantic Models
+class Movie(BaseModel):
+    id: str
+    title: str
+    original_title: str
+    type: str
+    start_year: int
+    runtime: int
+    genres: str
+    avg_rating: float = None
+    num_votes: int = None
 
-@movies_bp.route('/movies', methods=['GET'])
-def get_movies() -> Any:
-    """Endpoint to retrieve a list of movies.
-
-    Query Parameters:
-        limit: Number of movies to return (default 10, max 100).
-        offset: Number of movies to skip (default 0).
-        sort: Sort order ('popularity', 'rating', 'year', default 'popularity').
-        order: Sort direction ('asc' or 'desc', default 'desc').
-        type: Type of content ('movie', 'tvSeries', default 'movie').
-        min_votes: Minimum number of votes (default 1000).
-
-    Returns:
-        JSON response containing a list of movies.
-    """
-    limit = min(int(request.args.get('limit', 10)), 100)
-    offset = int(request.args.get('offset', 0))
-    sort = request.args.get('sort', 'popularity')
-    order = request.args.get('order', 'desc').upper()
-    content_type = request.args.get('type', 'movie')
-    min_votes = int(request.args.get('min_votes', 1000))
-
+# Endpoints
+@router.get("/", response_model=List[Movie])
+def get_movies(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    sort: str = Query("popularity"),
+    order: str = Query("desc"),
+    type: str = Query("movie"),
+    min_votes: int = Query(1000, ge=0),
+) -> Any:
+    """Retrieve a list of movies."""
     sort_options = {
-        'popularity': 'num_votes',
-        'rating': 'avg_rating',
-        'year': 'start_year'
+        'popularity': 'mr.num_votes',
+        'rating': 'mr.avg_rating',
+        'year': 'm.start_year',
     }
-    sort_column = sort_options.get(sort, 'num_votes')
+    sort_column = sort_options.get(sort, 'mr.num_votes')
+    order = order.upper()
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     query = f"""
-        SELECT id, title, original_title, type, start_year,
-               runtime, genres, avg_rating, num_votes
-        FROM movies
-        WHERE type = %s AND num_votes >= %s
+        SELECT m.id, m.title, m.original_title, m.type, m.start_year,
+               m.runtime, m.genres, mr.avg_rating, mr.num_votes
+        FROM movies m
+        LEFT JOIN movie_ratings mr ON m.id = mr.movie_id
+        WHERE m.type = %s AND COALESCE(mr.num_votes, 0) >= %s
         ORDER BY {sort_column} {order} NULLS LAST
         LIMIT %s OFFSET %s
     """
-
-    cursor.execute(query, (content_type, min_votes, limit, offset))
+    cursor.execute(query, (type, min_votes, limit, offset))
     movies = cursor.fetchall()
 
     cursor.close()
     conn.close()
 
-    return jsonify(movies)
+    return movies
 
-
-@movies_bp.route('/movies/<string:movie_id>', methods=['GET'])
+@router.get("/{movie_id}", response_model=Movie)
 def get_movie(movie_id: str) -> Any:
-    """Endpoint to retrieve details of a specific movie.
-
-    Args:
-        movie_id: The ID of the movie.
-
-    Returns:
-        JSON response containing movie details or an error message.
-    """
+    """Retrieve details of a specific movie."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM movies WHERE id = %s", (movie_id,))
+    cursor.execute("""
+        SELECT m.*, mr.avg_rating, mr.num_votes
+        FROM movies m
+        LEFT JOIN movie_ratings mr ON m.id = mr.movie_id
+        WHERE m.id = %s
+    """, (movie_id,))
     movie = cursor.fetchone()
 
     cursor.close()
     conn.close()
 
     if movie:
-        return jsonify(movie)
-    else:
-        return jsonify({"error": "Movie not found"}), 404
+        return movie
+    raise HTTPException(status_code=404, detail="Movie not found")
 
-
-@movies_bp.route('/movies/search', methods=['GET'])
-def search_movies() -> Any:
-    """Endpoint to search for movies by title.
-
-    Query Parameters:
-        query: The search query string.
-        limit: Number of movies to return (default 10, max 100).
-        offset: Number of movies to skip (default 0).
-        type: Type of content ('movie', 'tvSeries', default 'movie').
-        min_votes: Minimum number of votes (default 100).
-
-    Returns:
-        JSON response containing a list of movies matching the search query.
-    """
-    query = request.args.get('query', '', type=str)
-    limit = min(int(request.args.get('limit', 10)), 100)
-    offset = int(request.args.get('offset', 0))
-    content_type = request.args.get('type', 'movie')
-    min_votes = int(request.args.get('min_votes', 100))
-
+@router.get("/search", response_model=List[Movie])
+def search_movies(
+    query: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    type: str = Query("movie"),
+    min_votes: int = Query(100, ge=0),
+) -> Any:
+    """Search for movies by title."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT id, title, original_title, type, start_year,
-               runtime, genres, avg_rating, num_votes
-        FROM movies
-        WHERE title ILIKE %s AND type = %s AND num_votes >= %s
-        ORDER BY num_votes DESC NULLS LAST
+    cursor.execute(
+        """
+        SELECT m.id, m.title, m.original_title, m.type, m.start_year,
+               m.runtime, m.genres, mr.avg_rating, mr.num_votes
+        FROM movies m
+        LEFT JOIN movie_ratings mr ON m.id = mr.movie_id
+        WHERE m.title ILIKE %s AND m.type = %s AND COALESCE(mr.num_votes, 0) >= %s
+        ORDER BY COALESCE(mr.num_votes, 0) DESC NULLS LAST
         LIMIT %s OFFSET %s
-    """, (f'%{query}%', content_type, min_votes, limit, offset))
+        """,
+        (f'%{query}%', type, min_votes, limit, offset),
+    )
     movies = cursor.fetchall()
 
     cursor.close()
     conn.close()
 
-    return jsonify(movies)
+    return movies

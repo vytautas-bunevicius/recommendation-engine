@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://127.0.0.1:5000';
+const API_BASE_URL = 'http://127.0.0.1:8000';
 
 async function fetchAPI(endpoint, method = 'GET', body = null) {
     const options = {
@@ -76,6 +76,7 @@ async function searchMovies() {
     try {
         const movies = await fetchAPI(`/movies/search?query=${encodeURIComponent(query)}`);
         console.log('Search results:', movies);
+        console.log('Calling displayMovies with:', movies, 'search-results');
         displayMovies(movies, 'search-results');
     } catch (error) {
         console.error('Error searching movies:', error);
@@ -106,8 +107,13 @@ async function getViewingHistory() {
 }
 
 function displayMovies(movies, containerId) {
+    console.log('displayMovies called with:', movies, containerId);
     const container = document.getElementById(containerId);
-    console.log('Displaying movies:', movies);
+    if (!container) {
+        console.error(`Container with id '${containerId}' not found`);
+        return;
+    }
+
     if (!Array.isArray(movies) || movies.length === 0) {
         container.innerHTML = '<p>No movies found.</p>';
         return;
@@ -119,8 +125,8 @@ function displayMovies(movies, containerId) {
             return `
                 <div class="movie-item">
                     <h3>${movie.title || 'No Title'}</h3>
-                    <p>Watched on: ${new Date(movie.watch_date).toLocaleDateString()}</p>
-                    <p>Duration: ${movie.watch_duration} minutes</p>
+                    <p>Watched on: ${movie.watch_date ? new Date(movie.watch_date).toLocaleDateString() : 'Unknown'}</p>
+                    <p>Duration: ${movie.watch_duration || 'Unknown'} minutes</p>
                 </div>
             `;
         } else {
@@ -130,6 +136,7 @@ function displayMovies(movies, containerId) {
                     <h3>${movie.title || 'No Title'}</h3>
                     <p>Year: ${movie.start_year || 'N/A'}</p>
                     <p>Rating: ${movie.avg_rating ? movie.avg_rating.toFixed(1) : 'N/A'}</p>
+                    <p>Genres: ${movie.genres || 'N/A'}</p>
                 </div>
             `;
         }

@@ -1,51 +1,72 @@
-"""Main module for the Flask application providing API endpoints and serving the web UI.
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+from psycopg2.extras import DictCursor
 
-This module creates and configures the Flask application, registers blueprints
-for movies, users, and recommendations, and sets up routes to serve the static
-files for the web UI. It also configures CORS for all routes.
-"""
+from src.api.movies import router as movies_router
+from src.api.users import router as users_router
+from src.api.recommendations import router as recommendations_router
+from src.recommender.content_based import ContentBasedRecommender
+from src.database.connection import get_db_connection
 
-from flask import Flask, send_from_directory
-from flask_cors import CORS
+# Initialize FastAPI app
+app = FastAPI(
+    title="Movie Recommender",
+    description="API for movie recommendations using FastAPI",
+    version="1.0.0",
+)
 
-from src.api.movies import movies_bp
-from src.api.recommendations import recommendations_bp
-from src.api.users import users_bp
+# Configure CORS
+origins = [
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def create_app() -> Flask:
-    """Creates and configures the Flask application.
+# Include API routers
+app.include_router(movies_router, prefix="/movies", tags=["Movies"])
+app.include_router(users_router, prefix="/users", tags=["Users"])
+app.include_router(recommendations_router, prefix="/recommendations", tags=["Recommendations"])
 
-    This function initializes the Flask app, enables CORS, registers blueprints
-    for various API endpoints, and sets up routes to serve the static files for
-    the web UI.
+# Mount static files
+current_dir = Path(__file__).resolve().parent  # src/api
+ui_dir = current_dir.parent / "ui"  # src/ui
 
-    Returns:
-        The configured Flask application.
-    """
-    app = Flask(__name__, static_folder='../ui')
+# Mount static files at /static to serve JS and CSS
+app.mount("/static", StaticFiles(directory=str(ui_dir)), name="static")
 
-    # Enable CORS for all routes
-    CORS(app, resources={r"/*": {"origins": ["http://localhost:5000", "http://127.0.0.1:5000"]}})
+# Mount index.html at root
+@app.get("/", include_in_schema=False)
+async def serve_ui():
+    return FileResponse(str(ui_dir / "index.html"))
 
-    # Register blueprints for API endpoints
-    app.register_blueprint(movies_bp)
-    app.register_blueprint(users_bp)
-    app.register_blueprint(recommendations_bp)
+# Initialize ContentBasedRecommender on startup
+@app.on_event("startup")
+def startup_event():
+    """Initialize the content-based recommender system."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=DictCursor)  # Use DictCursor for dictionary-like access
+    try:
+        app.state.recommender = ContentBasedRecommender(cursor)
+        print("ContentBasedRecommender initialized successfully.")
+    except Exception as e:
+        print(f"Error initializing ContentBasedRecommender: {e}")
+    finally:
+        cursor.close()
+        conn.close()
 
-    @app.route('/')
-    def index():
-        """Serves the main HTML file for the web UI."""
-        return send_from_directory(app.static_folder, 'index.html')
-
-    @app.route('/<path:path>')
-    def serve_static(path: str):
-        """Serves static files for the web UI."""
-        return send_from_directory(app.static_folder, path)
-
-    return app
-
-
+# Run the application
 if __name__ == "__main__":
-    app = create_app()
-    app.run(debug=True)
+    import uvicorn
+    uvicorn.run("src.api.main:app", host="0.0.0.0", port=8000, reload=True)

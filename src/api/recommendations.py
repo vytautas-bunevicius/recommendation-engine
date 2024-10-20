@@ -1,79 +1,61 @@
-"""
-API module for handling recommendation-related endpoints.
-Provides endpoints to get personalized recommendations and similar movies.
-"""
+"""API module for handling recommendation-related endpoints."""
 
-import logging
-from typing import Any
+from typing import Any, List
 
-from flask import Blueprint, jsonify, request
-from flask_cors import CORS
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 
 from src.database.connection import get_db_connection
-from src.recommender.content_based import (
-    get_content_based_recommendations,
-    get_similar_movies
-)
 
-recommendations_bp = Blueprint('recommendations', __name__)
-CORS(recommendations_bp)
+router = APIRouter()
 
-@recommendations_bp.route('/users/<uuid:user_id>/recommendations', methods=['GET'])
-def get_recommendations(user_id) -> Any:
-    """Endpoint to get personalized movie recommendations for a user.
+# Pydantic Models
+class RecommendedMovie(BaseModel):
+    id: str
+    title: str
+    genres: str
+    avg_rating: float
+    start_year: int
 
-    Args:
-        user_id: The UUID of the user.
+# Dependency to get the recommender
+def get_recommender():
+    from src.api.main import app  # Import here to avoid circular import
+    return app.state.recommender
 
-    Query Parameters:
-        limit: Number of recommendations to return (default 10).
-
-    Returns:
-        JSON response containing a list of recommended movies.
-    """
-    limit = request.args.get('limit', 10, type=int)
-    logging.info(f"Fetching recommendations for user {user_id} with limit {limit}")
-
+# Endpoints
+@router.get("/users/{user_id}/recommendations", response_model=List[RecommendedMovie])
+def get_recommendations(
+    user_id: str,
+    recommender = Depends(get_recommender),
+) -> Any:
+    """Get personalized movie recommendations for a user."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        recommendations = get_content_based_recommendations(cursor, str(user_id), limit)
-        logging.info(f"Retrieved {len(recommendations)} recommendations")
-        return jsonify(recommendations)
+        recommendations = recommender.get_content_based_recommendations(cursor, user_id)
+        return [RecommendedMovie(**movie) for movie in recommendations]
     except Exception as e:
-        logging.error(f"Error getting recommendations: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
         conn.close()
 
-@recommendations_bp.route('/movies/<string:movie_id>/similar', methods=['GET'])
-def get_similar_movies_endpoint(movie_id: str) -> Any:
-    """Endpoint to get movies similar to a given movie.
-
-    Args:
-        movie_id: The ID of the movie.
-
-    Query Parameters:
-        limit: Number of similar movies to return (default 10).
-
-    Returns:
-        JSON response containing a list of similar movies.
-    """
-    limit = request.args.get('limit', 10, type=int)
-    logging.info(f"Fetching similar movies for movie {movie_id} with limit {limit}")
-
+@router.get("/movies/{movie_id}/similar", response_model=List[RecommendedMovie])
+def get_similar_movies(
+    movie_id: str,
+    limit: int = 10,
+    recommender = Depends(get_recommender),
+) -> Any:
+    """Get movies similar to a given movie."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        similar_movies = get_similar_movies(cursor, movie_id, limit)
-        logging.info(f"Retrieved {len(similar_movies)} similar movies")
-        return jsonify(similar_movies)
+        similar_movies = recommender.get_similar_movies(cursor, movie_id, limit)
+        return [RecommendedMovie(**movie) for movie in similar_movies]
     except Exception as e:
-        logging.error(f"Error getting similar movies: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
         conn.close()
