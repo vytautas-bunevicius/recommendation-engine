@@ -33,7 +33,7 @@ def get_recommender():
     Raises:
         HTTPException: If the recommender system is not initialized.
     """
-    from src.api.main import app  # Import here to avoid circular import
+    from src.api.main import app  # pylint: disable=import-outside-toplevel
     if app.state.recommender is None:
         raise HTTPException(status_code=500, detail="Recommender system not initialized.")
     return app.state.recommender

@@ -46,14 +46,14 @@ def get_movies(
 
     Args:
         limit (int): The maximum number of movies to return. Defaults to 10.
-        offset (int): The number of movies to skip before starting to collect the
-            result set. Defaults to 0.
+        offset (int): The number of movies to skip before starting to collect
+            the result set. Defaults to 0.
         sort (str): The field to sort the movies by. Options are 'popularity',
             'rating', or 'year'. Defaults to 'popularity'.
         order (str): The order of sorting, either 'asc' for ascending or 'desc'
             for descending. Defaults to 'desc'.
-        movie_type (str): The type of media to filter by, e.g., 'movie' or 'series'.
-            Defaults to 'movie'.
+        movie_type (str): The type of media to filter by, e.g., 'movie' or
+            'series'. Defaults to 'movie'.
         min_votes (int): The minimum number of votes a movie must have to be
             included. Defaults to 1000.
 
@@ -61,11 +61,12 @@ def get_movies(
         List[Movie]: A list of movies matching the query parameters.
 
     Raises:
-        HTTPException: If an invalid order parameter is provided or if the database
-            connection/query fails.
+        HTTPException: If an invalid order parameter is provided or if the
+        database connection/query fails.
     """
     logger.info(
-        "Fetching movies with params: limit=%s, offset=%s, sort=%s, order=%s, movie_type=%s, min_votes=%s",
+        "Fetching movies with params: limit=%s, offset=%s, sort=%s, order=%s,"
+        " movie_type=%s, min_votes=%s",
         limit,
         offset,
         sort,
@@ -132,9 +133,12 @@ def search_movies(
     Args:
         query (str): The search query string. Must be at least 1 character long.
         limit (int): The maximum number of movies to return. Defaults to 10.
-        offset (int): The number of movies to skip before starting to collect the result set. Defaults to 0.
-        movie_type (str): The type of media to filter by, e.g., 'movie' or 'series'. Defaults to 'movie'.
-        min_votes (int): The minimum number of votes a movie must have to be included. Defaults to 100.
+        offset (int): The number of movies to skip before starting to collect
+            the result set. Defaults to 0.
+        movie_type (str): The type of media to filter by, e.g., 'movie' or
+            'series'. Defaults to 'movie'.
+        min_votes (int): The minimum number of votes a movie must have to be
+            included. Defaults to 100.
 
     Returns:
         List[Movie]: A list of movies matching the search query.
@@ -197,7 +201,8 @@ def get_movie(movie_id: str):
         Movie: The movie details.
 
     Raises:
-        HTTPException: If the movie is not found or if the database connection/query fails.
+        HTTPException: If the movie is not found or if the database
+        connection/query fails.
     """
     logger.info("Fetching movie with id: %s", movie_id)
 
