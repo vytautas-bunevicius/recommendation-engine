@@ -12,17 +12,20 @@
         <h1>MOVIEFLIX</h1>
         <div id="user-select-container">
             <div id="user-select-wrapper">
-                <select id="user-select" class="hidden">
+                <select id="user-select">
                     <option value="">Select a user</option>
+                    <option value="bc20155b-3778-4a56-ac95-485aef765be5">Victoria Moore</option>
+                    <option value="6ec05699-7a5f-4b75-a7c5-d78a0c7bc204">Patricia Colon</option>
+                    <!-- Add more users as needed -->
                 </select>
-                <div id="user-select-spinner" class="spinner"></div>
+                <div id="user-select-spinner" class="spinner hidden"></div>
             </div>
         </div>
     </header>
 
     <main>
         <section id="search">
-            <h2>Search Movies</h2>
+            <h2 class="section-title">Search Movies</h2>
             <div class="search-container">
                 <input type="text" id="search-query" placeholder="Search for a movie...">
                 <button id="search-button">Search</button>
@@ -31,14 +34,14 @@
         </section>
 
         <section id="recommendations">
-            <h2>Recommended for You</h2>
+            <h2 class="section-title">Recommended for You</h2>
             <div id="recommendation-list" class="movie-grid">
                 <p class="placeholder-text">Select a user to see recommendations</p>
             </div>
         </section>
 
         <section id="viewing-history">
-            <h2>Continue Watching</h2>
+            <h2 class="section-title">Continue Watching</h2>
             <div id="history-list" class="movie-grid">
                 <p class="placeholder-text">Select a user to see viewing history</p>
             </div>

@@ -1,11 +1,35 @@
 const API_BASE_URL = 'http://127.0.0.1:8000';
 
 function showSpinner(elementId) {
-    document.getElementById(elementId).classList.remove('hidden');
+    const container = document.getElementById(elementId);
+    const spinnerContainer = document.createElement('div');
+    spinnerContainer.className = 'spinner-container';
+    spinnerContainer.innerHTML = '<div class="spinner"></div>';
+    container.appendChild(spinnerContainer);
 }
 
 function hideSpinner(elementId) {
-    document.getElementById(elementId).classList.add('hidden');
+    const container = document.getElementById(elementId);
+    const spinnerContainer = container.querySelector('.spinner-container');
+    if (spinnerContainer) {
+        container.removeChild(spinnerContainer);
+    }
+}
+
+function showUserSelectSpinner() {
+    const userSelectWrapper = document.getElementById('user-select-wrapper');
+    const spinner = document.getElementById('user-select-spinner');
+    userSelectWrapper.classList.add('loading');
+    spinner.classList.remove('hidden');
+    document.getElementById('user-select').disabled = true;
+}
+
+function hideUserSelectSpinner() {
+    const userSelectWrapper = document.getElementById('user-select-wrapper');
+    const spinner = document.getElementById('user-select-spinner');
+    userSelectWrapper.classList.remove('loading');
+    spinner.classList.add('hidden');
+    document.getElementById('user-select').disabled = false;
 }
 
 async function fetchAPI(endpoint, method = 'GET', body = null) {
@@ -34,7 +58,8 @@ async function fetchAPI(endpoint, method = 'GET', body = null) {
 }
 
 async function loadUsers() {
-    showSpinner('user-select-spinner');
+    showUserSelectSpinner();
+
     try {
         const users = await fetchAPI('/users');
         const userSelect = document.getElementById('user-select');
@@ -45,12 +70,11 @@ async function loadUsers() {
             option.textContent = user.name;
             userSelect.appendChild(option);
         });
-        hideSpinner('user-select-spinner');
-        userSelect.classList.remove('hidden');
     } catch (error) {
         console.error('Error loading users:', error);
         alert('Failed to load users. Please try again later.');
-        hideSpinner('user-select-spinner');
+    } finally {
+        hideUserSelectSpinner();
     }
 }
 
@@ -58,14 +82,15 @@ async function getRecommendations() {
     const userId = document.getElementById('user-select').value;
     if (!userId) return;
 
-    const recommendationList = document.getElementById('recommendation-list');
-    recommendationList.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
+    showSpinner('recommendation-list');
     try {
         const recommendations = await fetchAPI(`/users/${userId}/recommendations`);
         displayMovies(recommendations, 'recommendation-list');
     } catch (error) {
         console.error('Error getting recommendations:', error);
-        recommendationList.innerHTML = '<p>Error getting recommendations. Please try again later.</p>';
+        document.getElementById('recommendation-list').innerHTML = '<p class="placeholder-text">Error getting recommendations. Please try again later.</p>';
+    } finally {
+        hideSpinner('recommendation-list');
     }
 }
 
@@ -73,14 +98,15 @@ async function getViewingHistory() {
     const userId = document.getElementById('user-select').value;
     if (!userId) return;
 
-    const historyList = document.getElementById('history-list');
-    historyList.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
+    showSpinner('history-list');
     try {
         const history = await fetchAPI(`/users/${userId}/viewing_history`);
         displayMovies(history, 'history-list', true);
     } catch (error) {
         console.error('Error getting viewing history:', error);
-        historyList.innerHTML = '<p>Error getting viewing history. Please try again later.</p>';
+        document.getElementById('history-list').innerHTML = '<p class="placeholder-text">Error getting viewing history. Please try again later.</p>';
+    } finally {
+        hideSpinner('history-list');
     }
 }
 
@@ -91,21 +117,22 @@ async function searchMovies() {
         return;
     }
 
-    const searchResults = document.getElementById('search-results');
-    searchResults.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
+    showSpinner('search-results');
     try {
         const movies = await fetchAPI(`/movies/search?query=${encodeURIComponent(query)}`);
         displayMovies(movies, 'search-results');
     } catch (error) {
         console.error('Error searching movies:', error);
-        searchResults.innerHTML = '<p>Error searching movies. Please try again later.</p>';
+        document.getElementById('search-results').innerHTML = '<p class="placeholder-text">Error searching movies. Please try again later.</p>';
+    } finally {
+        hideSpinner('search-results');
     }
 }
 
 function displayMovies(movies, containerId, isHistory = false) {
     const container = document.getElementById(containerId);
     if (!Array.isArray(movies) || movies.length === 0) {
-        container.innerHTML = '<p>No movies found.</p>';
+        container.innerHTML = '<p class="placeholder-text">No movies found.</p>';
         return;
     }
 
