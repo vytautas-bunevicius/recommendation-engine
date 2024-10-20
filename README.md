@@ -1,20 +1,16 @@
-# Netflix-like Recommender System
+# Recommendation Engine
 
 ## Project Overview
 
-This project implements a Netflix-like recommender system using Python, Flask, and PostgreSQL on AWS RDS. It processes IMDb datasets to create a movie recommendation engine with a RESTful API. The PostgreSQL database is hosted on Amazon RDS for improved scalability, reliability, and management.
+This project implements a Netflix-like recommender system using Python, FastAPI, and PostgreSQL on AWS RDS. It processes IMDb datasets to create a movie recommendation engine with a RESTful API and a user-friendly frontend interface. The PostgreSQL database is hosted on Amazon RDS for improved scalability, reliability, and management.
 
 ## Architecture Diagram
 
 ![Architecture Diagram](images/architecture.png)
 
-*Note: The architecture diagram has been updated to highlight the use of AWS RDS for the PostgreSQL database.*
-
 ## Entity-Relationship Diagram (ERD)
 
-![ERD Diagram](images/erd-diagram.png)
-
-*Ensure that the ERD reflects all current tables and their relationships as defined in the database schema.*
+![ERD Diagram](images/erd_diagram.png)
 
 ## Table of Contents
 
@@ -25,14 +21,15 @@ This project implements a Netflix-like recommender system using Python, Flask, a
 5. [Database Setup](#database-setup)
 6. [Data Processing](#data-processing)
 7. [Synthetic User Data Generation](#synthetic-user-data-generation)
-8. [Usage](#usage)
-9. [API Endpoints](#api-endpoints)
-10. [Database Schema](#database-schema)
-11. [Recommendation Algorithm](#recommendation-algorithm)
-12. [AWS RDS Configuration](#aws-rds-configuration)
-13. [Testing](#testing)
-14. [Troubleshooting](#troubleshooting)
-15. [Future Improvements](#future-improvements)
+8. [Running the Application](#running-the-application)
+9. [Frontend UI](#frontend-ui)
+10. [API Endpoints](#api-endpoints)
+11. [Database Schema](#database-schema)
+12. [Recommendation Algorithm](#recommendation-algorithm)
+13. [AWS RDS Configuration](#aws-rds-configuration)
+14. [Testing](#testing)
+15. [Troubleshooting](#troubleshooting)
+16. [Future Improvements](#future-improvements)
 
 ## Features
 
@@ -40,7 +37,8 @@ This project implements a Netflix-like recommender system using Python, Flask, a
 - Comprehensive PostgreSQL database schema for movies, persons, and user interactions
 - Synthetic user data generation with viewing history
 - Content-based movie recommendations
-- RESTful API for accessing movie data and recommendations
+- RESTful API built with FastAPI for accessing movie data and recommendations
+- User-friendly frontend interface for interacting with the recommender system
 - AWS RDS PostgreSQL database for enhanced scalability and management
 - Detailed logging and error handling for robust data processing
 
@@ -83,37 +81,23 @@ This project implements a Netflix-like recommender system using Python, Flask, a
    DB_PASSWORD=your_rds_password
    DB_HOST=your-rds-endpoint.rds.amazonaws.com
    DB_PORT=5432
+   DATA_DIR=data
+   BATCH_SIZE=5000
+   MAX_WORKERS=5
    ```
 
-   Replace the placeholder values with your actual AWS RDS credentials and endpoint.
+   - **DB_NAME:** Name of your PostgreSQL database.
+   - **DB_USER:** Your AWS RDS PostgreSQL username.
+   - **DB_PASSWORD:** Your AWS RDS PostgreSQL password.
+   - **DB_HOST:** Your AWS RDS endpoint.
+   - **DB_PORT:** PostgreSQL port (default is `5432`).
+   - **DATA_DIR:** Directory where IMDb data will be stored.
+   - **BATCH_SIZE:** Number of records to process in each batch during data processing.
+   - **MAX_WORKERS:** Number of threads for parallel processing.
 
 2. **Load Environment Variables:**
 
-   Ensure that your environment variables are loaded. You can use the `dotenv` package or export them manually in your shell.
-
-   **Using `dotenv`:**
-
-   Install `python-dotenv` if not already installed:
-   ```bash
-   pip install python-dotenv
-   ```
-
-   Update your `src/database/connection.py` to load the `.env` file:
-   ```python
-   from dotenv import load_dotenv
-   import os
-
-   load_dotenv()
-
-   def get_db_connection():
-       return psycopg2.connect(
-           dbname=os.getenv('DB_NAME', 'recommendation_engine'),
-           user=os.getenv('DB_USER', 'postgres'),
-           password=os.getenv('DB_PASSWORD', 'your_password'),
-           host=os.getenv('DB_HOST', 'netflix-recommender-db.clucc4cum01z.us-east-1.rds.amazonaws.com'),
-           port=os.getenv('DB_PORT', '5432')
-       )
-   ```
+   Ensure that your environment variables are loaded. The provided scripts and modules use the `python-dotenv` package to automatically load variables from the `.env` file.
 
 ## Database Setup
 
@@ -169,27 +153,76 @@ This project implements a Netflix-like recommender system using Python, Flask, a
    - **Conflict Handling:** Skips duplicate user entries gracefully.
    - **Logging:** Detailed logs are maintained in `user_data_generation.log` for monitoring progress and troubleshooting.
 
-## Usage
+## Running the Application
 
-1. **Start the Flask API Server:**
+1. **Start the FastAPI Server:**
 
    ```bash
-   python src/api/main.py
+   uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
    ```
 
-   The API will be available at `http://localhost:5000`.
+   - **--host 0.0.0.0:** Makes the server accessible externally.
+   - **--port 8000:** Specifies the port number.
+   - **--reload:** Enables auto-reloading on code changes (useful for development).
+
+   The API will be available at `http://localhost:8000`.
+
+2. **Access the API Documentation:**
+
+   FastAPI automatically generates interactive API documentation. Access it at:
+
+   - Swagger UI: `http://localhost:8000/docs`
+   - ReDoc: `http://localhost:8000/redoc`
+
+## Frontend UI
+
+1. **Access the Frontend Interface:**
+
+   The frontend UI is served by the FastAPI server. Open your web browser and navigate to:
+
+   ```
+   http://localhost:8000/
+   ```
+
+   This interface allows users to:
+
+   - Select a user to view personalized recommendations and viewing history.
+   - Search for movies by title.
+   - View details of recommended and similar movies.
+
+2. **Frontend Structure:**
+
+   - **HTML:** Located at `src/ui/index.html`
+   - **CSS:** Located at `src/ui/styles.css`
+   - **JavaScript:** Located at `src/ui/script.js`
+
+   The frontend interacts with the backend API to fetch and display data dynamically.
+
+3. **UI Screenshot:**
+
+   ![UI Screenshot](images/ui_screenshot.png)
 
 ## API Endpoints
 
-- `GET /movies`: Retrieve a list of movies
-- `GET /movies/<movie_id>`: Get details of a specific movie
-- `GET /movies/search`: Search for movies by title
-- `GET /users/<user_id>`: Get user information
-- `GET /users/<user_id>/viewing_history`: Get a user's viewing history
-- `GET /users/<user_id>/recommendations`: Get personalized movie recommendations
-- `GET /movies/<movie_id>/similar`: Get similar movies
+### Movies
 
-For detailed API documentation, refer to the `src/api` directory.
+- `GET /movies`: Retrieve a list of movies
+- `GET /movies/{movie_id}`: Get details of a specific movie
+- `GET /movies/search`: Search for movies by title
+- `GET /movies/{movie_id}/similar`: Get similar movies
+
+### Users
+
+- `GET /users`: Retrieve a list of users
+- `GET /users/{user_id}`: Get user information
+- `GET /users/{user_id}/viewing_history`: Get a user's viewing history
+- `POST /users/{user_id}/viewing_history`: Add a viewing history entry for a user
+
+### Recommendations
+
+- `GET /users/{user_id}/recommendations`: Get personalized movie recommendations
+
+For detailed API documentation, refer to the interactive docs available at `/docs` or `/redoc` when the server is running.
 
 ## Database Schema
 
@@ -260,10 +293,9 @@ python -m unittest discover tests
 1. **Empty `movies` Table:**
    - **Symptom:** Error during viewing history generation stating no movies found.
    - **Solution:** Ensure that IMDb data has been processed and the `movies` table is populated before running the user data generation script.
-
-   ```bash
-   python3 scripts/process_imdb_data.py
-   ```
+     ```bash
+     python3 scripts/process_imdb_data.py
+     ```
 
 2. **Database Connection Errors:**
    - **Symptom:** Unable to connect to AWS RDS PostgreSQL instance.
@@ -282,21 +314,32 @@ python -m unittest discover tests
 
 ### Reviewing Logs
 
-Check the `user_data_generation.log` file for detailed logs and error messages. This can provide insights into what went wrong during data generation.
+- **User Data Generation Logs:**
+  Check the `user_data_generation.log` file for detailed logs and error messages.
+  ```bash
+  tail -f user_data_generation.log
+  ```
 
-```bash
-tail -f user_data_generation.log
-```
+- **Data Processing Logs:**
+  Check the `data_processing.log` file for insights into data processing steps.
+  ```bash
+  tail -f data_processing.log
+  ```
+
+- **API Server Logs:**
+  Monitor the terminal where the FastAPI server is running for real-time logs.
 
 ## Future Improvements
 
 - **User Authentication and Authorization:** Implement secure user login and access controls.
-- **Frontend Interface:** Develop a user-friendly web interface for interacting with the recommender system.
+- **Enhanced Frontend Interface:** Develop a more feature-rich and responsive web interface.
 - **Collaborative Filtering:** Enhance the recommendation algorithm by incorporating collaborative filtering techniques.
 - **Caching Mechanisms:** Implement caching (e.g., Redis) to improve API response times.
 - **Continuous Integration and Deployment (CI/CD):** Set up pipelines for automated testing and deployment.
 - **Comprehensive Testing:** Develop unit and integration tests to ensure system reliability.
 - **Auto-scaling:** Configure auto-scaling for the API using AWS Elastic Beanstalk or ECS to handle varying loads.
 - **Monitoring and Alerting:** Integrate AWS CloudWatch for real-time monitoring and alerts on system performance and issues.
+- **Dockerization:** Containerize the application for easier deployment and scalability.
+- **Advanced Search Features:** Implement more sophisticated search capabilities, such as fuzzy search or filtering by multiple criteria.
 
 ---
