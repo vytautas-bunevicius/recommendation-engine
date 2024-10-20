@@ -1,3 +1,5 @@
+# src/api/recommendations.py
+
 """API module for handling recommendation-related endpoints."""
 
 from typing import Any, List, Optional
@@ -54,11 +56,11 @@ def get_recommendations(
     recommended_movies = []
     for movie in recommendations:
         movie_dict = {
-            "id": movie[0],
-            "title": movie[1],
-            "genres": movie[2],
-            "avg_rating": movie[3],
-            "start_year": movie[4],
+            "id": movie['id'],  # Changed from movie[0] to movie['id']
+            "title": movie['title'],  # Changed from movie[1] to movie['title']
+            "genres": movie.get('genres'),  # Changed from movie[2] to movie['genres']
+            "avg_rating": movie.get('avg_rating'),  # Changed from movie[3] to movie['avg_rating']
+            "start_year": movie.get('start_year'),  # Changed from movie[4] to movie['start_year']
         }
         recommended_movies.append(movie_dict)
 
@@ -96,11 +98,11 @@ def get_similar_movies(
     similar_movies_list = []
     for movie in similar_movies:
         movie_dict = {
-            "id": movie[0],
-            "title": movie[1],
-            "genres": movie[2],
-            "avg_rating": movie[3],
-            "start_year": movie[4],
+            "id": movie['id'],  # Changed from movie[0] to movie['id']
+            "title": movie['title'],  # Changed from movie[1] to movie['title']
+            "genres": movie.get('genres'),  # Changed from movie[2] to movie['genres']
+            "avg_rating": movie.get('avg_rating'),  # Changed from movie[3] to movie['avg_rating']
+            "start_year": movie.get('start_year'),  # Changed from movie[4] to movie['start_year']
         }
         similar_movies_list.append(movie_dict)
 

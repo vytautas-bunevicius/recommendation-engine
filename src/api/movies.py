@@ -1,15 +1,15 @@
 # src/api/movies.py
 
-"""API module for handling movie-related endpoints."""
-
-from typing import Any, List, Optional
-
+import logging
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from psycopg2.extras import DictCursor
 
 from src.database.connection import get_db_connection
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Pydantic Models
 class Movie(BaseModel):
@@ -32,8 +32,10 @@ def get_movies(
     order: str = Query("desc"),
     type: str = Query("movie"),
     min_votes: int = Query(1000, ge=0),
-) -> Any:
+):
     """Retrieve a list of movies."""
+    logger.info(f"Fetching movies with params: limit={limit}, offset={offset}, sort={sort}, order={order}, type={type}, min_votes={min_votes}")
+
     sort_options = {
         'popularity': 'mr.num_votes',
         'rating': 'mr.avg_rating',
@@ -46,8 +48,10 @@ def get_movies(
 
     conn = get_db_connection()
     if conn is None:
+        logger.error("Database connection failed")
         raise HTTPException(status_code=500, detail="Database connection failed.")
-    cursor = conn.cursor()
+
+    cursor = conn.cursor(cursor_factory=DictCursor)
 
     query = f"""
         SELECT m.id, m.title, m.original_title, m.type, m.start_year,
@@ -61,39 +65,73 @@ def get_movies(
     try:
         cursor.execute(query, (type, min_votes, limit, offset))
         movies = cursor.fetchall()
+        logger.info(f"Found {len(movies)} movies")
     except Exception as e:
+        logger.error(f"Database query failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+    finally:
         cursor.close()
         conn.close()
-        raise HTTPException(status_code=500, detail=str(e))
 
-    cursor.close()
-    conn.close()
+    return [Movie(**movie) for movie in movies]
 
-    # Convert to list of dictionaries
-    movie_list = []
-    for movie in movies:
-        movie_dict = {
-            "id": movie[0],
-            "title": movie[1],
-            "original_title": movie[2],
-            "type": movie[3],
-            "start_year": movie[4],
-            "runtime": movie[5],
-            "genres": movie[6],
-            "avg_rating": movie[7],
-            "num_votes": movie[8],
-        }
-        movie_list.append(movie_dict)
+@router.get("/search", response_model=List[Movie])
+def search_movies(
+    query: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    type: str = Query("movie"),
+    min_votes: int = Query(100, ge=0),
+):
+    """Search for movies by title using full-text search."""
+    logger.info(f"Searching for movies with query: {query}, type: {type}, min_votes: {min_votes}")
 
-    return movie_list
-
-@router.get("/{movie_id}", response_model=Movie)
-def get_movie(movie_id: str) -> Any:
-    """Retrieve details of a specific movie."""
     conn = get_db_connection()
     if conn is None:
+        logger.error("Database connection failed")
         raise HTTPException(status_code=500, detail="Database connection failed.")
-    cursor = conn.cursor()
+
+    cursor = conn.cursor(cursor_factory=DictCursor)
+
+    # Create a tsquery from the search query
+    tsquery = ' & '.join(query.split())
+
+    sql = """
+        SELECT m.id, m.title, m.original_title, m.type, m.start_year,
+               m.runtime, m.genres, mr.avg_rating, mr.num_votes,
+               ts_rank_cd(to_tsvector('english', m.title), to_tsquery(%s)) AS rank
+        FROM movies m
+        LEFT JOIN movie_ratings mr ON m.id = mr.movie_id
+        WHERE to_tsvector('english', m.title) @@ to_tsquery(%s)
+          AND m.type = %s
+          AND COALESCE(mr.num_votes, 0) >= %s
+        ORDER BY rank DESC, COALESCE(mr.num_votes, 0) DESC
+        LIMIT %s OFFSET %s
+    """
+    try:
+        cursor.execute(sql, (tsquery, tsquery, type, min_votes, limit, offset))
+        movies = cursor.fetchall()
+        logger.info(f"Found {len(movies)} movies matching the query")
+    except Exception as e:
+        logger.error(f"Database query failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+    return [Movie(**movie) for movie in movies]
+
+@router.get("/{movie_id}", response_model=Movie)
+def get_movie(movie_id: str):
+    """Retrieve details of a specific movie."""
+    logger.info(f"Fetching movie with id: {movie_id}")
+
+    conn = get_db_connection()
+    if conn is None:
+        logger.error("Database connection failed")
+        raise HTTPException(status_code=500, detail="Database connection failed.")
+
+    cursor = conn.cursor(cursor_factory=DictCursor)
 
     query = """
         SELECT m.id, m.title, m.original_title, m.type, m.start_year,
@@ -106,81 +144,14 @@ def get_movie(movie_id: str) -> Any:
         cursor.execute(query, (movie_id,))
         movie = cursor.fetchone()
     except Exception as e:
+        logger.error(f"Database query failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+    finally:
         cursor.close()
         conn.close()
-        raise HTTPException(status_code=500, detail=str(e))
-
-    cursor.close()
-    conn.close()
 
     if movie:
-        movie_dict = {
-            "id": movie[0],
-            "title": movie[1],
-            "original_title": movie[2],
-            "type": movie[3],
-            "start_year": movie[4],
-            "runtime": movie[5],
-            "genres": movie[6],
-            "avg_rating": movie[7],
-            "num_votes": movie[8],
-        }
-        return movie_dict
+        return Movie(**movie)
     else:
+        logger.warning(f"Movie not found: {movie_id}")
         raise HTTPException(status_code=404, detail="Movie not found")
-
-@router.get("/search", response_model=List[Movie])
-def search_movies(
-    query: str = Query(..., min_length=1),
-    limit: int = Query(10, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    type: str = Query("movie"),
-    min_votes: int = Query(100, ge=0),
-) -> Any:
-    """Search for movies by title."""
-    conn = get_db_connection()
-    if conn is None:
-        raise HTTPException(status_code=500, detail="Database connection failed.")
-    cursor = conn.cursor()
-
-    search_query = f"%{query}%"
-    sql = """
-        SELECT m.id, m.title, m.original_title, m.type, m.start_year,
-               m.runtime, m.genres, mr.avg_rating, mr.num_votes
-        FROM movies m
-        LEFT JOIN movie_ratings mr ON m.id = mr.movie_id
-        WHERE m.title ILIKE %s AND m.type = %s AND COALESCE(mr.num_votes, 0) >= %s
-        ORDER BY COALESCE(mr.num_votes, 0) DESC NULLS LAST
-        LIMIT %s OFFSET %s
-    """
-    try:
-        cursor.execute(sql, (search_query, type, min_votes, limit, offset))
-        movies = cursor.fetchall()
-    except Exception as e:
-        cursor.close()
-        conn.close()
-        raise HTTPException(status_code=500, detail=str(e))
-
-    cursor.close()
-    conn.close()
-
-    if not movies:
-        raise HTTPException(status_code=404, detail="No movies found matching the query.")
-
-    # Convert to list of dictionaries
-    movie_list = []
-    for movie in movies:
-        movie_dict = {
-            "id": movie[0],
-            "title": movie[1],
-            "original_title": movie[2],
-            "type": movie[3],
-            "start_year": movie[4],
-            "runtime": movie[5],
-            "genres": movie[6],
-            "avg_rating": movie[7],
-            "num_votes": movie[8],
-        }
-        movie_list.append(movie_dict)
-
-    return movie_list

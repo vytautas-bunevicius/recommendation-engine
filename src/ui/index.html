@@ -1,40 +1,50 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Movie Recommender</title>
-    <link rel="stylesheet" href="/static/styles.css" />
-  </head>
-  <body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOVIEFLIX</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Netflix+Sans:wght@300;400;700&display=swap" rel="stylesheet">
+</head>
+<body>
     <header>
-      <h1>Movie Recommender</h1>
-      <select id="user-select">
-        <option value="">Select a user</option>
-      </select>
+        <h1>MOVIEFLIX</h1>
+        <div id="user-select-container">
+            <div id="user-select-wrapper">
+                <select id="user-select" class="hidden">
+                    <option value="">Select a user</option>
+                </select>
+                <div id="user-select-spinner" class="spinner"></div>
+            </div>
+        </div>
     </header>
 
     <main>
-      <section id="recommendations">
-        <h2>Recommendations</h2>
-        <button id="get-recommendations">Get Recommendations</button>
-        <div id="recommendation-list" class="movie-grid"></div>
-      </section>
+        <section id="search">
+            <h2>Search Movies</h2>
+            <div class="search-container">
+                <input type="text" id="search-query" placeholder="Search for a movie...">
+                <button id="search-button">Search</button>
+            </div>
+            <div id="search-results" class="movie-grid"></div>
+        </section>
 
-      <section id="search">
-        <h2>Search Movies</h2>
-        <input type="text" id="search-query" placeholder="Enter movie title" />
-        <button id="search-button">Search</button>
-        <div id="search-results" class="movie-grid"></div>
-      </section>
+        <section id="recommendations">
+            <h2>Recommended for You</h2>
+            <div id="recommendation-list" class="movie-grid">
+                <p class="placeholder-text">Select a user to see recommendations</p>
+            </div>
+        </section>
 
-      <section id="viewing-history">
-        <h2>Viewing History</h2>
-        <button id="get-history">Get Viewing History</button>
-        <div id="history-list" class="movie-grid"></div>
-      </section>
+        <section id="viewing-history">
+            <h2>Continue Watching</h2>
+            <div id="history-list" class="movie-grid">
+                <p class="placeholder-text">Select a user to see viewing history</p>
+            </div>
+        </section>
     </main>
 
     <script src="/static/script.js"></script>
-  </body>
+</body>
 </html>

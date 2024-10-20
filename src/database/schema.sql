@@ -77,3 +77,4 @@ CREATE INDEX idx_persons_name ON persons(name);
 CREATE INDEX idx_directors_movie_id ON directors(movie_id);
 CREATE INDEX idx_writers_movie_id ON writers(movie_id);
 CREATE INDEX idx_known_for_titles_person_id ON known_for_titles(person_id);
+CREATE INDEX idx_movies_title_fts ON movies USING gin(to_tsvector('english', title));

@@ -1,4 +1,12 @@
-const API_BASE_URL = ''; // Use relative URLs
+const API_BASE_URL = 'http://127.0.0.1:8000';
+
+function showSpinner(elementId) {
+    document.getElementById(elementId).classList.remove('hidden');
+}
+
+function hideSpinner(elementId) {
+    document.getElementById(elementId).classList.add('hidden');
+}
 
 async function fetchAPI(endpoint, method = 'GET', body = null) {
     const options = {
@@ -13,7 +21,7 @@ async function fetchAPI(endpoint, method = 'GET', body = null) {
     }
 
     try {
-        const response = await fetch(endpoint, options);
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
         if (!response.ok) {
             const errorData = await response.json();
             throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
@@ -25,50 +33,54 @@ async function fetchAPI(endpoint, method = 'GET', body = null) {
     }
 }
 
-function showLoading(elementId) {
-    const element = document.getElementById(elementId);
-    element.innerHTML = '<div class="loading-spinner"></div>';
-}
-
-function hideLoading(elementId) {
-    const element = document.getElementById(elementId);
-    element.innerHTML = '';
-}
-
 async function loadUsers() {
+    showSpinner('user-select-spinner');
     try {
         const users = await fetchAPI('/users');
-        console.log('Users:', users);
         const userSelect = document.getElementById('user-select');
+        userSelect.innerHTML = '<option value="">Select a user</option>';
         users.forEach(user => {
             const option = document.createElement('option');
             option.value = user.id;
             option.textContent = user.name;
             userSelect.appendChild(option);
         });
+        hideSpinner('user-select-spinner');
+        userSelect.classList.remove('hidden');
     } catch (error) {
         console.error('Error loading users:', error);
         alert('Failed to load users. Please try again later.');
+        hideSpinner('user-select-spinner');
     }
 }
 
 async function getRecommendations() {
     const userId = document.getElementById('user-select').value;
-    if (!userId) {
-        alert('Please select a user');
-        return;
-    }
+    if (!userId) return;
 
-    showLoading('recommendation-list');
+    const recommendationList = document.getElementById('recommendation-list');
+    recommendationList.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
     try {
         const recommendations = await fetchAPI(`/users/${userId}/recommendations`);
-        console.log('Recommendations:', recommendations);
         displayMovies(recommendations, 'recommendation-list');
     } catch (error) {
         console.error('Error getting recommendations:', error);
-        alert('Error getting recommendations. Please check the console for details.');
-    } finally {
-        hideLoading('recommendation-list');
+        recommendationList.innerHTML = '<p>Error getting recommendations. Please try again later.</p>';
+    }
+}
+
+async function getViewingHistory() {
+    const userId = document.getElementById('user-select').value;
+    if (!userId) return;
+
+    const historyList = document.getElementById('history-list');
+    historyList.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
+    try {
+        const history = await fetchAPI(`/users/${userId}/viewing_history`);
+        displayMovies(history, 'history-list', true);
+    } catch (error) {
+        console.error('Error getting viewing history:', error);
+        historyList.innerHTML = '<p>Error getting viewing history. Please try again later.</p>';
     }
 }
 
@@ -79,79 +91,54 @@ async function searchMovies() {
         return;
     }
 
-    showLoading('search-results');
+    const searchResults = document.getElementById('search-results');
+    searchResults.innerHTML = '<div class="spinner-container"><div class="spinner"></div></div>';
     try {
         const movies = await fetchAPI(`/movies/search?query=${encodeURIComponent(query)}`);
-        console.log('Search results:', movies);
         displayMovies(movies, 'search-results');
     } catch (error) {
         console.error('Error searching movies:', error);
-        alert('Error searching movies. Please check the console for details.');
-    } finally {
-        hideLoading('search-results');
+        searchResults.innerHTML = '<p>Error searching movies. Please try again later.</p>';
     }
 }
 
-async function getViewingHistory() {
-    const userId = document.getElementById('user-select').value;
-    if (!userId) {
-        alert('Please select a user');
-        return;
-    }
-
-    showLoading('history-list');
-    try {
-        const history = await fetchAPI(`/users/${userId}/viewing_history`);
-        console.log('Viewing history:', history);
-        displayMovies(history, 'history-list');
-    } catch (error) {
-        console.error('Error getting viewing history:', error);
-        alert('Error getting viewing history. Please check the console for details.');
-    } finally {
-        hideLoading('history-list');
-    }
-}
-
-function displayMovies(movies, containerId) {
-    console.log('displayMovies called with:', movies, containerId);
+function displayMovies(movies, containerId, isHistory = false) {
     const container = document.getElementById(containerId);
-    if (!container) {
-        console.error(`Container with id '${containerId}' not found`);
-        return;
-    }
-
     if (!Array.isArray(movies) || movies.length === 0) {
         container.innerHTML = '<p>No movies found.</p>';
         return;
     }
 
-    container.innerHTML = movies.map(movie => {
-        // Check if it's a viewing history item (has watch_date)
-        if (movie.watch_date) {
-            return `
-                <div class="movie-item">
-                    <h3>${movie.title || 'No Title'}</h3>
-                    <p>Watched on: ${new Date(movie.watch_date).toLocaleDateString()}</p>
-                    <p>Duration: ${movie.watch_duration} minutes</p>
-                </div>
-            `;
-        } else {
-            // For recommendations and search results
-            return `
-                <div class="movie-item">
-                    <h3>${movie.title || 'No Title'}</h3>
-                    <p>Year: ${movie.start_year || 'N/A'}</p>
-                    <p>Rating: ${movie.avg_rating ? movie.avg_rating.toFixed(1) : 'N/A'}</p>
-                    <p>Genres: ${movie.genres || 'N/A'}</p>
-                </div>
-            `;
-        }
-    }).join('');
+    container.innerHTML = movies.map(movie => `
+        <div class="movie-item">
+            <h3>${movie.title}</h3>
+            ${movie.start_year ? `<p>Year: ${movie.start_year}</p>` : ''}
+            ${movie.avg_rating ? `<p class="rating">Rating: ${movie.avg_rating.toFixed(1)}</p>` : ''}
+            ${movie.genres ? `<p>Genres: ${movie.genres}</p>` : ''}
+            ${isHistory ? `
+                <p>Watched on: ${new Date(movie.watch_date).toLocaleDateString()}</p>
+                <p>Duration: ${movie.watch_duration} minutes</p>
+            ` : ''}
+        </div>
+    `).join('');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     loadUsers();
-    document.getElementById('get-recommendations').addEventListener('click', getRecommendations);
+    document.getElementById('user-select').addEventListener('change', () => {
+        const userId = document.getElementById('user-select').value;
+        if (userId) {
+            getRecommendations();
+            getViewingHistory();
+        } else {
+            document.getElementById('recommendation-list').innerHTML = '<p class="placeholder-text">Select a user to see recommendations</p>';
+            document.getElementById('history-list').innerHTML = '<p class="placeholder-text">Select a user to see viewing history</p>';
+        }
+    });
     document.getElementById('search-button').addEventListener('click', searchMovies);
-    document.getElementById('get-history').addEventListener('click', getViewingHistory);
+    document.getElementById('search-query').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            searchMovies();
+        }
+    });
 });
