@@ -64,9 +64,13 @@ This project implements a Netflix-like recommender system using Python, FastAPI,
    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
    ```
 
-3. **Install Dependencies:**
+3. **Install the Project:**
    ```bash
-   pip install -r requirements.txt
+   # Install the project and its dependencies
+   pip install -e .
+
+   # For development dependencies
+   pip install -e ".[dev]"
    ```
 
 ## Environment Setup
