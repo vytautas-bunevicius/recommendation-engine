@@ -1,11 +1,8 @@
 {
-    "version": "0.2",
-    "language": "en",
-    "ignorePaths": [
-      "**/*.py",
-      "**/*.html",
-      "**/*.css",
-      "**/*.js"
-    ],
-    "words": []
-  }
+  "version": "0.2",
+  "language": "en",
+  "ignorePaths": [
+    "**/*"
+  ],
+  "words": []
+}

@@ -53,18 +53,21 @@ This project implements a Netflix-like recommender system using Python, FastAPI,
 ## Installation
 
 1. **Clone the Repository:**
+
    ```bash
    git clone https://github.com/vytautas-bunevicius/recommendation-engine.git
    cd recommendation-engine
    ```
 
 2. **Set Up a Virtual Environment:**
+
    ```bash
    python3 -m venv venv
    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
    ```
 
 3. **Install the Project:**
+
    ```bash
    # Install the project and its dependencies
    pip install -e .
@@ -184,7 +187,7 @@ This project implements a Netflix-like recommender system using Python, FastAPI,
 
    The frontend UI is served by the FastAPI server. Open your web browser and navigate to:
 
-   ```
+   ```plaintext
    http://localhost:8000/
    ```
 
@@ -243,6 +246,7 @@ The AWS RDS PostgreSQL database includes the following main tables:
 - `movie_ratings`: Store movie ratings
 
 **Indexes:**
+
 - Multiple indexes are created to improve query performance, such as on movie titles, user IDs, viewing dates, and more.
 
 For the complete schema, refer to `src/database/schema.sql`.
@@ -282,7 +286,7 @@ For detailed AWS RDS setup instructions, refer to the [AWS RDS Documentation](ht
 
 ## Testing
 
-_Comprehensive tests are not yet implemented._
+*Comprehensive tests are not yet implemented.*
 
 To run tests (once implemented):
 
@@ -297,6 +301,7 @@ python -m unittest discover tests
 1. **Empty `movies` Table:**
    - **Symptom:** Error during viewing history generation stating no movies found.
    - **Solution:** Ensure that IMDb data has been processed and the `movies` table is populated before running the user data generation script.
+
      ```bash
      python3 scripts/process_imdb_data.py
      ```
@@ -320,12 +325,14 @@ python -m unittest discover tests
 
 - **User Data Generation Logs:**
   Check the `user_data_generation.log` file for detailed logs and error messages.
+
   ```bash
   tail -f user_data_generation.log
   ```
 
 - **Data Processing Logs:**
   Check the `data_processing.log` file for insights into data processing steps.
+
   ```bash
   tail -f data_processing.log
   ```
