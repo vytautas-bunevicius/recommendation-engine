@@ -68,12 +68,16 @@ This project implements a Netflix-like recommender system using Python, FastAPI,
 
 3. **Install the Project:**
 
-   ```bash
-   # Install the project and its dependencies
-   pip install -e .
+   Choose one of the following installation methods:
 
-   # For development dependencies
-   pip install -e ".[dev]"
+   **Using UV (recommended for faster installs):**
+   ```bash
+   uv sync
+   ```
+
+   **Using pip:**
+   ```bash
+   pip install -e .
    ```
 
 ## Environment Setup
